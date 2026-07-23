@@ -1,0 +1,102 @@
+# base.yml — 验证用基础配置：3 上游 endpoint + 路由/JWT/限流/IP/改写全开
+server:
+  address: "0.0.0.0:18090"
+  admin_address: "127.0.0.1:19090"
+
+upstreams:
+  - name: grp_rr
+    lb: round_robin
+    endpoints:
+      - { host: 127.0.0.1, port: 18181, weight: 1 }
+      - { host: 127.0.0.1, port: 18182, weight: 1 }
+      - { host: 127.0.0.1, port: 18183, weight: 1 }
+    circuit_breaker: { failure_threshold: 3, open_timeout_ms: 2000, half_open_max_requests: 1 }
+    connection_pool: { max_idle: 8, idle_timeout_ms: 5000 }
+    health_check: { enabled: true, path: /__ctl/stats, interval_ms: 1000, timeout_ms: 500, healthy_threshold: 1, unhealthy_threshold: 2 }
+
+  - name: grp_weighted
+    lb: weighted
+    endpoints:
+      - { host: 127.0.0.1, port: 18181, weight: 5 }
+      - { host: 127.0.0.1, port: 18182, weight: 3 }
+      - { host: 127.0.0.1, port: 18183, weight: 2 }
+    connection_pool: { max_idle: 8, idle_timeout_ms: 5000 }
+
+  - name: grp_leastconn
+    lb: least_conn
+    endpoints:
+      - { host: 127.0.0.1, port: 18181, weight: 1 }
+      - { host: 127.0.0.1, port: 18182, weight: 1 }
+      - { host: 127.0.0.1, port: 18183, weight: 1 }
+    connection_pool: { max_idle: 16, idle_timeout_ms: 5000 }
+
+  - name: grp_single
+    lb: round_robin
+    endpoints:
+      - { host: 127.0.0.1, port: 18181, weight: 1 }
+    circuit_breaker: { failure_threshold: 3, open_timeout_ms: 2000, half_open_max_requests: 1 }
+    connection_pool: { max_idle: 8, idle_timeout_ms: 5000 }
+
+routes:
+  # 精确匹配
+  - { name: exact_users, match_type: exact, path: /api/users, upstream: grp_single }
+  - { name: exact_orders, match_type: exact, path: /api/orders, upstream: grp_single }
+  # 最长前缀
+  - { name: pfx_api, match_type: prefix, path: /api, upstream: grp_single }
+  - { name: pfx_api_users, match_type: prefix, path: /api/users, upstream: grp_single }
+  - { name: pfx_api_users_admin, match_type: prefix, path: /api/users/admin, upstream: grp_single }
+  # method 过滤
+  - { name: m_get, match_type: exact, path: /api/item, methods: [GET], upstream: grp_single }
+  - { name: m_post, match_type: exact, path: /api/item, methods: [POST], upstream: grp_single }
+  - { name: m_delete, match_type: exact, path: /api/item, methods: [DELETE], upstream: grp_single }
+  # host 过滤
+  - { name: host_a, match_type: prefix, path: /vh, host: api-a.test, upstream: grp_single }
+  - { name: host_b, match_type: prefix, path: /vh, host: api-b.test, upstream: grp_single }
+  # LB 测试路由
+  - { name: rr, match_type: prefix, path: /rr, upstream: grp_rr, strip_prefix: true }
+  - { name: weighted, match_type: prefix, path: /weighted, upstream: grp_weighted, strip_prefix: true }
+  - { name: leastconn, match_type: prefix, path: /leastconn, upstream: grp_leastconn, strip_prefix: true }
+  # 连接池/熔断
+  - { name: pool, match_type: prefix, path: /pool, upstream: grp_single, strip_prefix: true }
+  - { name: cb, match_type: prefix, path: /cb, upstream: grp_single, strip_prefix: true }
+  # 限流 per-route(ip)
+  - name: rl_ip
+    match_type: prefix
+    path: /rl_ip
+    upstream: grp_single
+    strip_prefix: true
+    rate_limit: { enabled: true, capacity: 5, refill_per_sec: 1, key: ip }
+  # 限流 per-client(jwt sub)
+  - name: rl_user
+    match_type: prefix
+    path: /rl_user
+    upstream: grp_single
+    strip_prefix: true
+    rate_limit: { enabled: true, capacity: 5, refill_per_sec: 1, key: user }
+  # 请求改写
+  - name: rewrite
+    match_type: prefix
+    path: /api/v1
+    upstream: grp_single
+    strip_prefix: true
+    rewrite_prefix: /internal
+    request_headers:
+      set: { X-Forwarded-By: bronx-gateway, X-Custom: setval }
+      remove: [X-Drop-Me]
+  # 公开路由与 API key 路由
+  - { name: public_none, match_type: prefix, path: /public, upstream: grp_single, strip_prefix: true, auth: none }
+  - { name: apikey, match_type: prefix, path: /apikey, upstream: grp_single, strip_prefix: true, auth: api_key }
+
+auth:
+  jwt:
+    enabled: false
+    secret: "test-secret-do-not-use-in-prod"
+    issuer: ""
+  api_key:
+    header: X-API-Key
+    keys: ["validation-key"]
+
+ip_filter:
+  enabled: false
+  mode: denylist
+  cidrs: ["127.0.0.0/8"]

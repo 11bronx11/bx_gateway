@@ -1,0 +1,6 @@
+add_executable(gw     gw.cpp)
+add_executable(hub    hub.cpp)
+add_executable(banctl banctl.cpp)
+target_link_libraries(gw     bronx_core)
+target_link_libraries(hub    bronx_core)
+target_link_libraries(banctl bronx_core)

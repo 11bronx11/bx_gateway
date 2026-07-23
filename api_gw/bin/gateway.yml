@@ -1,0 +1,115 @@
+server:
+  address:       "0.0.0.0:8090"
+  admin_address: "127.0.0.1:9090"
+  io_workers:    4
+  maintenance:   false
+
+upstreams:
+  - name: api
+    lb: least_conn
+    timeout:
+      total_ms:   30000
+      connect_ms: 3000
+      read_ms:    30000
+    limits:
+      max_inflight: 512
+    circuit_breaker:
+      failure_threshold:      5
+      window_ms:              10000
+      buckets:                10
+      min_requests:           20
+      failure_rate:           50
+      slow_ms:                1000
+      slow_rate:              50
+      open_timeout_ms:        5000
+      max_open_timeout_ms:    60000
+      half_open_max_requests: 3
+      half_open_successes:    2
+      failure_statuses: [500, 502, 503, 504]
+    connection_pool:
+      max_idle:        50
+      idle_timeout_ms: 60000
+    health_check:
+      enabled:             true
+      path:                "/healthz"
+      interval_ms:         5000
+      timeout_ms:          2000
+      healthy_threshold:   2
+      unhealthy_threshold: 3
+    endpoints:
+      - { host: "127.0.0.1", port: 8080, weight: 3 }
+      - { host: "127.0.0.1", port: 8081, weight: 1 }
+
+rt_cache:
+  cap: 4096
+
+routes:
+  - name:          api
+    match_type:    prefix
+    path:          /api
+    upstream:      api
+    priority:      10
+    strip_prefix:  true
+    methods:       [GET, POST, PUT, PATCH, DELETE]
+    request_headers:
+      set:
+        X-Forwarded-By: bronx-gw
+      remove:
+        - X-Internal-Debug
+    auth:            jwt
+    require_scopes:  [read]
+    require_roles:   []
+    rate_limit:
+      enabled:        true
+      capacity:       200
+      refill_per_sec: 100
+      key:            ip
+
+trusted_proxies:
+  - 127.0.0.1/8
+
+cors:
+  enabled:                 true
+  allow_origins:           ["https://legit.example.com"]
+  allow_methods:           "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+  allow_headers:           "Authorization, Content-Type, X-Api-Key"
+  allow_credentials:       true
+  max_age:                 600
+  short_circuit_preflight: true
+
+auth:
+  jwt:
+    enabled:    true
+    algo:       HS256
+    secret:     "change-me"
+    issuer:     "bronx"
+    audience:   ""
+    leeway_sec: 10
+    keys: []
+  api_key:
+    header: "X-Api-Key"
+    keys:
+      - { id: svc-a, hash: "<sha256-hex-64>", enabled: true, scopes: [read] }
+  forward:
+    enabled:       true
+    strip_bearer:  true
+    strip_api_key: true
+    prefix:        "X-Auth-"
+
+ip_filter:
+  enabled: true
+  mode:    denylist
+  cidrs:   []
+
+ip_policy:
+  submit_sock:    "/tmp/bronx_ip_submit.sock"
+  subscribe_sock: "/tmp/bronx_ip_subscribe.sock"
+  instance_id:    "gw-1"
+  waf:
+    enabled: true
+    ban_ms:  600000
+  rate_report:
+    enabled:   true
+    hits:      100
+    window_ms: 60000
+    ban_ms:    300000

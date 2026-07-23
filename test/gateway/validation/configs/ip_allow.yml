@@ -1,0 +1,13 @@
+server: {address: "0.0.0.0:18090", admin_address: "127.0.0.1:19090"}
+upstreams:
+  - name: grp_single
+    lb: round_robin
+    endpoints: [{host: 127.0.0.1, port: 18181, weight: 1}]
+    connection_pool: {max_idle: 8, idle_timeout_ms: 5000}
+routes:
+  - {name: test, match_type: prefix, path: /test, upstream: grp_single, strip_prefix: true}
+auth: {jwt: {enabled: false}}
+ip_filter:
+  enabled: true
+  mode: allowlist
+  cidrs: ["192.168.1.1"]  # 127.0.0.1不在白名单

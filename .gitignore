@@ -1,0 +1,53 @@
+# ── 构建产物 ─────────────────────────────────────────────────
+/build/
+/build-*/
+/lib/
+/lib-*/
+/bin/
+/bin-*/
+
+# ── 运行时数据 ───────────────────────────────────────────────
+/log/
+/logs/
+*.log
+
+# banhub 运行时 SQLite 持久化文件
+/api_gw/bin/db/*.db
+
+# logrotate 运行时状态 (记轮转时间戳, 机器相关, 不入库)
+/api_gw/bin/.logrotate.state
+/api_gw/bin/db/*.db-wal
+/api_gw/bin/db/*.db-shm
+
+# ── CMake 生成文件 ───────────────────────────────────────────
+/compile_commands.json
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+Makefile
+
+# fuzz 的构建规则是测试源码，不是 CMake 生成文件
+!/test/fuzz/Makefile
+
+# ── IDE / 工具本地文件 ───────────────────────────────────────
+/.cache/
+/.idea/
+/.vscode/
+/.claude/
+/.codegraph/
+
+# ── OS 噪声 ──────────────────────────────────────────────────
+.DS_Store
+*.swp
+*~
+
+# ── 不提交的本地说明文件 ─────────────────────────────────────
+/AGENTS.md
+/CLAUDE.md
+/other/
+/.clangd
+
+# ── 测试运行产物 ─────────────────────────────────────────────
+# 可引用的测试结论写入 test/TEST_REPORT_*.md；原始本地运行输出不自动入库。
+/test/k6/evidence/
+/test/gateway/validation/reports/

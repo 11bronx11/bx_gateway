@@ -1,0 +1,44 @@
+# api_gw/bin/bronx.yml — gw 进程的 bronx 框架配置(hub 用同目录 hub_bronx.yml, 两份独立)
+# 日志平铺在 logs/ 下, 文件名带 gw_ 前缀, 和 hub 的 hub_ 前缀区分, gw+hub 同跑也不撞。
+# logs/ 目录需提前建好, 或把 file 改成绝对路径。
+
+cpu_pool:
+  threads: 2
+  max_queue: 0
+  name: cpu
+
+fiber:
+  stack_size: 131072
+  stack_pool_size: 8
+  guard_page: 1
+
+tcp:
+  connect:
+    timeout: 5000
+
+tcp_server:
+  recv_timeout: 120000
+
+logs:
+  - name: root
+    level: info          # debug / info / warn / error / fatal
+    appenders:
+      - type: BxStdoutLogAppender
+        async: false
+      - type: BxFileLogAppender
+        file: logs/gw_root.log
+        async: true
+  - name: system
+    level: info
+    appenders:
+      - type: BxFileLogAppender
+        file: logs/gw_system.log
+        async: true
+  - name: gw
+    level: info
+    appenders:
+      - type: BxStdoutLogAppender
+        async: false
+      - type: BxFileLogAppender
+        file: logs/gw.log
+        async: true

@@ -1,0 +1,16 @@
+# api_gw/bin/hub.yml — banhub 业务配置
+# bronx 框架配置见同目录 hub_bronx.yml
+# hub.yml 固定由 Hub 进程读取
+# db_path 指向 SQLite 文件, Hub 重启时从中恢复规则。
+#
+# 启动: ./bin/hub (从任意目录均可)
+#   main 里 anchorRoot() 读 /proc/self/exe 自动 chdir 到 repo 根, 业务配置/db/日志
+#   的相对路径都锚在根。仅 /proc 不可用时退回老约定: 需从 repo 根跑。
+
+server:
+  submit_sock:    "/tmp/bronx_ip_submit.sock"
+  subscribe_sock: "/tmp/bronx_ip_subscribe.sock"
+  admin_sock:     "/tmp/bronx_ip_admin.sock"
+  http_address:   "127.0.0.1:9091"
+  db_path:        "api_gw/bin/db/hub.db"
+  iom_workers:    2
