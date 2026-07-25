@@ -90,7 +90,7 @@ export function normalJwt() {
   check(r, {
     'normal: upstream response is 200': res => res.status === 200,
     'normal: response came from mock upstream': res => {
-      try { return JSON.parse(res.body).upstream === 'soak-mock'; }
+      try { return /^soak-/.test(JSON.parse(res.body).upstream || ''); }
       catch (_e) { return false; }
     },
   });

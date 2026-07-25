@@ -9,6 +9,7 @@
 #include "http_msg.h"
 #include "body.h"
 #include "metrics.h"
+#include "trace.h"
 #include <memory>
 #include <string>
 
@@ -53,6 +54,11 @@ public:
     // 不能留给 HTTP body/drain 逻辑吞掉。
     std::string takeBufferedInput();
 
+    // 全链路追踪状态,中间件/上游转发共用同一个 tag(连接 id + 请求序号)
+    TraceTag& trace() { return m_trace; }
+    const TraceTag& trace() const { return m_trace; }
+    void startTrace(const std::string& clientIp);
+
 private:
     // 读并解析一个请求头。返回:1 成功;0 连接正常关闭;<0 错误(已回写错误响应)。
     int read_req_head();
@@ -82,6 +88,7 @@ private:
     uint32_t             m_req_count = 0;
     size_t               m_peak_readable = 0;
     size_t               m_low_use_rounds = 0;
+    TraceTag             m_trace;
 };
 
 } // namespace gateway

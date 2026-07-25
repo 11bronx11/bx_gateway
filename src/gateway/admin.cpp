@@ -9,6 +9,10 @@
 #include "ronduan.h"
 #include "middlewares/builtin.h"
 #include "io.h"
+#include "trace.h"
+#include "util.h"
+#include <charconv>
+#include <limits>
 #include <sstream>
 
 namespace bronx {
@@ -49,6 +53,98 @@ static std::string json_esc(const std::string& s) {
         }
     }
     return out;
+}
+
+// query string 取一个参数, 没有返回空。admin 口自用, 不做 percent 解码。
+static std::string q_get(const std::string& query, const char* key) {
+    size_t klen = strlen(key);
+    size_t pos = 0;
+    while(pos < query.size()) {
+        size_t amp = query.find('&', pos);
+        size_t seg_end = amp == std::string::npos ? query.size() : amp;
+        size_t eq = query.find('=', pos);
+        if(eq != std::string::npos && eq < seg_end
+           && eq - pos == klen && query.compare(pos, klen, key) == 0) {
+            return query.substr(eq + 1, seg_end - eq - 1);
+        }
+        if(amp == std::string::npos) break;
+        pos = amp + 1;
+    }
+    return std::string();
+}
+
+static bool parse_u64(const std::string& value, uint64_t& out) {
+    if(value.empty()) return false;
+    const char* begin = value.data();
+    const char* end = begin + value.size();
+    auto [at, ec] = std::from_chars(begin, end, out);
+    return ec == std::errc{} && at == end;
+}
+
+static std::string traceStatusJson() {
+    auto& g = TraceGate::instance();
+    g.expire_check();   // 先结算过期, 再报状态, 别报个已经作废的 on
+    auto f = g.filter();
+    std::ostringstream ss;
+    ss << "{\"on\":" << (g.on() ? "true" : "false")
+       << ",\"level\":" << (int)g.level();
+    if(f) {
+        uint64_t now = bronx::GetCurrentMs();
+        ss << ",\"ip\":\"" << json_esc(f->ip) << "\""
+           << ",\"path\":\"" << json_esc(f->path) << "\""
+           << ",\"sample\":" << f->sample
+           // -1 = 不过期(ttl=0 开的)。别用 0 表永久, 那和"刚好过期"撞了
+           << ",\"expires_in_ms\":";
+        if(f->expireMs == 0) ss << -1;
+        else ss << (f->expireMs > now ? (int64_t)(f->expireMs - now) : 0);
+    }
+    ss << "}";
+    return ss.str();
+}
+
+// POST /trace/on?level=1&ip=&path=&sample=&ttl=
+// ttl 秒, 默认 600, 到点自动关 —— 防开了忘关把盘写满。ttl=0 才是永久。
+struct TraceOnReply {
+    int status;
+    std::string body;
+};
+
+static TraceOnReply traceOn(const std::string& query) {
+    TraceFilter f;
+    uint8_t level = 1;
+    std::string v = q_get(query, "level");
+    if(!v.empty()) {
+        int lv = atoi(v.c_str());
+        level = (uint8_t)(lv < 1 ? 1 : (lv > 2 ? 2 : lv));
+    }
+    f.ip   = q_get(query, "ip");
+    f.path = q_get(query, "path");
+    v = q_get(query, "sample");
+    if(!v.empty()) {
+        long s = atol(v.c_str());
+        f.sample = (uint32_t)(s < 1 ? 1 : s);
+    }
+    uint64_t ttl = 600;
+    v = q_get(query, "ttl");
+    if(!v.empty() && !parse_u64(v, ttl)) {
+        return {400, "bad trace ttl\n"};
+    }
+    const uint64_t now = bronx::GetCurrentMs();
+    const uint64_t maxExpire = (uint64_t)std::numeric_limits<int64_t>::max();
+    if(ttl && (now > maxExpire || ttl > (maxExpire - now) / 1000)) {
+        return {400, "trace ttl too large\n"};
+    }
+    f.expireMs = ttl ? now + ttl * 1000 : 0;
+
+    TraceGate::instance().open(level, f);
+    std::ostringstream ss;
+    ss << "trace on level=" << (int)level
+       << " ip=" << (f.ip.empty() ? "*" : f.ip)
+       << " path=" << (f.path.empty() ? "*" : f.path)
+       << " sample=1/" << f.sample
+       << " ttl=" << ttl << "s\n";
+    BRONX_LOG_WARN(g_logger) << "trace ON " << ss.str().substr(0, ss.str().size() - 1);
+    return {200, ss.str()};
 }
 
 static std::string prom_esc(const std::string& s) {
@@ -641,6 +737,21 @@ void AdminServer::onConnection(bronx::BxSocket::ptr client) {
         MaintGate::instance().set(false);
         BRONX_LOG_WARN(g_logger) << "maintenance mode OFF";
         sendPlain(client, 200, "maintenance off\n");
+        return;
+    }
+    if(path == "/trace" && method == "GET") {
+        sendPlain(client, 200, traceStatusJson() + "\n", "application/json");
+        return;
+    }
+    if(path == "/trace/on" && method == "POST") {
+        auto reply = traceOn(req->getQuery());
+        sendPlain(client, reply.status, reply.body);
+        return;
+    }
+    if(path == "/trace/off" && method == "POST") {
+        TraceGate::instance().close();
+        BRONX_LOG_WARN(g_logger) << "trace OFF";
+        sendPlain(client, 200, "trace off\n");
         return;
     }
     sendPlain(client, 404, "Not Found\n");

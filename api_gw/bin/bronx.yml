@@ -34,6 +34,8 @@ logs:
       - type: BxFileLogAppender
         file: logs/gw_system.log
         async: true
+      - type: BxStdoutLogAppender
+        async: false
   - name: gw
     level: info
     appenders:
@@ -41,4 +43,13 @@ logs:
         async: false
       - type: BxFileLogAppender
         file: logs/gw.log
+        async: true
+  # 全链路追踪。开关不在这, 在 admin 口: POST /trace/on / POST /trace/off / GET /trace。
+  # level 恒 info(TraceGate 自己控开关), 不挂 stdout —— 一条请求几十行, 刷屏且同步写拖慢
+  # reactor。也别配 sample_rate, 采样限流会静默丢行, trace 丢行就失去意义。
+  - name: trace
+    level: info
+    appenders:
+      - type: BxFileLogAppender
+        file: logs/gw_trace.log
         async: true

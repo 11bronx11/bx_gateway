@@ -6,6 +6,7 @@
 #include "http_msg.h"
 #include "body.h"
 #include "ip.h"
+#include "trace.h"
 #include <cstdint>
 #include <map>
 #include <string>
@@ -49,6 +50,9 @@ public:
     GwRequest::ptr      request()     const;
     BodyReader::ptr requestBody() const;
     GatewayConnection*  connection()  const { return m_conn; }
+
+    // 追踪 tag。有连接就用连接上那个(id/序号连续), 没有(测试构造)就用自带的空 tag。
+    TraceTag& trace() const { return *m_trace; }
 
     GwResponse::ptr     response()    const { return m_response; }
     void setResponse(const GwResponse::ptr& r) { m_response = r; }
@@ -100,6 +104,8 @@ private:
     RouteResult                     m_route;
     HeaderMap                       m_extra_resp_hdrs;
     std::map<std::string, std::any> m_attrs;
+    TraceTag                        m_own_trace;   // 无连接时的兜底
+    TraceTag*                       m_trace = &m_own_trace;
 };
 
 } // namespace gateway

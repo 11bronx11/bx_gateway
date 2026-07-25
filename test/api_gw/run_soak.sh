@@ -40,6 +40,9 @@ jwt_issuer="${SOAK_JWT_ISSUER:-bronx}"
 jwt_scope="${SOAK_JWT_SCOPE:-read write}"
 api_key="${SOAK_API_KEY:-soak-write-key}"
 limited_api_key="${SOAK_LIMITED_API_KEY:-soak-read-key}"
+k6_duration="${SOAK_K6_DURATION:-}"
+k6_bin="${K6:-k6}"
+k6_normal_rps="${SOAK_K6_NORMAL_RPS:-20}"
 
 run_dir=""
 runtime_root=""
@@ -1106,6 +1109,9 @@ fi
 [[ -f "$mock_py" && -f "$bench_py" && -f "$probes_py" ]] || die "missing soak support script"
 command -v python3 >/dev/null || die "python3 is required"
 command -v logrotate >/dev/null || die "logrotate is required for the production log-limit gate"
+if [[ -n "$k6_duration" ]]; then
+    command -v "$k6_bin" >/dev/null || die "k6 is required when SOAK_K6_DURATION is set"
+fi
 require_positive "$baseline_seconds" "$fault_seconds" "$rate_seconds" "$recovery_seconds" "$workers" \
     "$base_qps" "$burst_qps" "$multi_upstream_seconds" "$multi_upstream_qps" \
     "$multi_upstream_min_requests" "$fault_qps" "$rate_qps" "$client_ips" "$reload_seconds" "$log_reload_seconds" \
@@ -1212,6 +1218,27 @@ if [[ "$probe_only" == "1" ]]; then
     fi
     printf 'PASS: gateway probes satisfied\n'
     exit 0
+fi
+
+if [[ -n "$k6_duration" ]]; then
+    write_gateway 100 100 2500 2500
+    if ! admin_reload; then
+        fail "cannot apply k6 rate-limit configuration"
+    else
+        printf '\n=== k6 soak duration=%s rps=%s ===\n' "$k6_duration" "$k6_normal_rps"
+        mkdir -p "$run_dir/k6-soak"
+        if ! K6_GW_HOST=127.0.0.1 K6_GW_PORT="$business_port" \
+            K6_ADMIN_HOST=127.0.0.1 K6_ADMIN_PORT="$admin_port" \
+            K6_HUB_HOST=127.0.0.1 K6_HUB_PORT="$hub_http_port" \
+            K6_NORMAL_RPS="$k6_normal_rps" K6_RATE_PROBE_INTERVAL=30s \
+            SOAK_DURATION="$k6_duration" "$k6_bin" run \
+            --summary-export "$run_dir/k6-soak/summary.json" \
+            "$repo/test/k6/soak.js" 2>&1 | tee "$run_dir/k6-soak/k6.log"; then
+            fail "k6 soak phase"
+        fi
+    fi
+    write_gateway 10000 10000 2500 2500
+    admin_reload || fail "cannot restore normal configuration after k6"
 fi
 
 write_framework_log_config "hup-a" 0

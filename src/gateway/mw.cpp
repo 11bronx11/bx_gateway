@@ -7,7 +7,10 @@
 #include "endpoint.h"
 #include "metrics.h"
 #include "util.h"
+#include "trace.h"
 #include <utility>
+#include <chrono>
+#include <vector>
 #include <strings.h>
 
 namespace bronx {
@@ -17,6 +20,7 @@ namespace gateway {
 ReqCtx::ReqCtx(GatewayConnection* conn)
     : m_conn(conn)
     , m_start_ms(bronx::GetCurrentMs()) {
+    if(m_conn) m_trace = &m_conn->trace();
 }
 
 ReqCtx::ReqCtx(GwRequest::ptr req)
@@ -75,6 +79,10 @@ void ReqCtx::add_resp_hdr(const std::string& k, const std::string& v) {
 // 洋葱链:递归构造 next。索引 i 的中间件的 next 调用 i+1。
 // 短路:某中间件不调 next,链就停在那里(后续不执行)。
 void MwChain::run(ReqCtx& ctx) const {
+    if(ctx.trace().on) {
+        run_traced(ctx);
+        return;
+    }
     // 用 std::function 递归
     std::function<void(size_t)> dispatch = [&](size_t i) {
         if(i >= m_mws.size()) {
@@ -88,6 +96,65 @@ void MwChain::run(ReqCtx& ctx) const {
         m_mws[i]->handle(ctx, next);
     };
     dispatch(0);
+}
+
+static const char* respStateName(RespState s) {
+    switch(s) {
+        case RespState::OPEN:       return "open";
+        case RespState::SENT:       return "sent";
+        case RespState::STREAM:     return "stream";
+        case RespState::TUNNEL:     return "tunnel";
+        case RespState::WRITE_FAIL: return "write_fail";
+    }
+    return "?";
+}
+
+// 插桩版。判定一个中间件"放行还是短路"不靠它自己报, 靠观察:
+//   - 调完 handle 后 deepest 有没有推进过 i+1 → 有就是调了 next(放行)
+//   - 没推进 且 respState 变了 → 它自己出了响应(短路)
+//   - 没推进 且 是链尾 proxy → 终结中间件, 本就不调 next
+// 中间件本体一行不用改。
+void MwChain::run_traced(ReqCtx& ctx) const {
+    auto& tag = ctx.trace();
+    using clk = std::chrono::steady_clock;
+    size_t deepest = 0;
+    // 每层记录:自身开始时刻 + 花在下层的累计时间, 用来算不含下层的自身耗时
+    std::vector<clk::time_point> t_in(m_mws.size());
+    std::vector<clk::duration>   inner(m_mws.size(), clk::duration::zero());
+
+    GW_TRACE(tag, "chain start mws=" << m_mws.size());
+    auto chainBegin = clk::now();
+
+    std::function<void(size_t)> dispatch = [&](size_t i) {
+        if(i >= m_mws.size()) return;
+        if(ctx.isHandled()) return;
+        if(i + 1 > deepest) deepest = i + 1;
+
+        const std::string& name = m_mws[i]->name();
+        int stateBefore = (int)ctx.respState();
+        GW_TRACE2(tag, "mw " << i << " " << name << "  ->");
+
+        t_in[i] = clk::now();
+        NextFn next = [&dispatch, i]() { dispatch(i + 1); };
+        m_mws[i]->handle(ctx, next);
+        auto total = clk::now() - t_in[i];
+        auto self = total - inner[i];
+        if(i > 0) inner[i - 1] += total;
+
+        bool wentDeeper = deepest > i + 1;
+        const char* verdict = wentDeeper ? "pass"
+            : ((int)ctx.respState() != stateBefore ? "SHORT" : "end");
+        GW_TRACE(tag, "mw " << i << " " << name << "  " << verdict
+                 << " status=" << ctx.status()
+                 << " self=" << std::chrono::duration<double, std::milli>(self).count() << "ms"
+                 << " tot=" << std::chrono::duration<double, std::milli>(total).count() << "ms");
+    };
+    dispatch(0);
+
+    auto cost = clk::now() - chainBegin;
+    GW_TRACE(tag, "chain end   depth=" << deepest << "/" << m_mws.size()
+             << " status=" << ctx.status() << " state=" << respStateName(ctx.respState())
+             << " cost=" << std::chrono::duration<double, std::milli>(cost).count() << "ms");
 }
 
 bool loadClientAddr(ReqCtx& ctx, const std::vector<bronx::ipban::Ip>& trusted) {
