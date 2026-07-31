@@ -1,0 +1,49 @@
+# Framework configuration for the isolated gateway demo root.
+cpu_pool:
+  threads: 2
+  max_queue: 0
+  name: cpu
+
+fiber:
+  stack_size: 131072
+  stack_pool_size: 8
+  guard_page: 1
+
+tcp:
+  connect:
+    timeout: 5000
+
+tcp_server:
+  recv_timeout: 120000
+
+logs:
+  - name: root
+    level: info
+    appenders:
+      - type: BxStdoutLogAppender
+        async: false
+      - type: BxFileLogAppender
+        file: logs/gw_root.log
+        async: true
+  - name: system
+    level: info
+    appenders:
+      - type: BxFileLogAppender
+        file: logs/gw_system.log
+        async: true
+      - type: BxStdoutLogAppender
+        async: false
+  - name: gw
+    level: info
+    appenders:
+      - type: BxStdoutLogAppender
+        async: false
+      - type: BxFileLogAppender
+        file: logs/gw.log
+        async: true
+  - name: trace
+    level: info
+    appenders:
+      - type: BxFileLogAppender
+        file: logs/gw_trace.log
+        async: true

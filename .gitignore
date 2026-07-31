@@ -51,3 +51,15 @@ Makefile
 # 可引用的测试结论写入 test/TEST_REPORT_*.md；原始本地运行输出不自动入库。
 /test/k6/evidence/
 /test/gateway/validation/reports/
+
+# ── Demo 运行产物 ──────────────────────────────────────
+/demo/upstream/venv/
+/demo/run/
+/demo/logs/
+/demo/bin/
+/demo/api_gw/bin/db/
+/demo/nginx/ca/*.key
+/demo/nginx/ca/*.srl
+/demo/upstream/node_modules/
+/demo/out/
+/demo/tools/__pycache__/

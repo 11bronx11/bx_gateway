@@ -77,6 +77,25 @@ cmake -S . -B build-bx-asan -DBRONX_BUILD_TESTS=ON -DBRONX_SANITIZE=address,unde
 cmake -S . -B build-bx-tsan -DBRONX_BUILD_TESTS=ON -DBRONX_SANITIZE=thread
 ```
 
+## 完整演示
+
+仓库内置一套隔离的真实进程 Demo，覆盖 HTTPS/HTTP2、路由与改写、JWT、限流、
+WAF、动态 IP-ban、加权负载均衡、熔断恢复、SSE、热重载、WSS、Prometheus
+指标、Grafana 大盘以及 Alloy -> Loki 日志关联。它使用 `demo/` 下的独立 YAML、
+日志、SQLite 和 PID，不读写 `api_gw/bin/gateway.yml` 或正式 Hub 数据库。
+
+```bash
+./demo/up.sh
+sudo ./demo/up.sh nginx
+./demo/status.sh
+./demo/demo.sh       # 全部 16 项
+./demo/demo.sh 15    # 只演示 WSS
+./demo/demo.sh 16    # 只演示日志关联
+```
+
+依赖准备、端口、SSH 隧道、Grafana/Loki 日志查询和资源回收见
+[Demo 运行手册](demo/README.md)。`DEMO_PLAN.md` 是施工历史，不是当前运行说明。
+
 ## 部署与上手
 
 `gw` 和 `hub` 根据 `/proc/self/exe` 锚定运行根，因此直接运行构建输出的 `bin/gw`、`bin/hub` 即可，进程会自动 chdir 到仓库根，从 `api_gw/bin/` 读取 YAML。
@@ -815,4 +834,3 @@ K6_EVIDENCE_SOAK_DURATION=15m bash test/k6/run_evidence.sh
 - [隔离浸泡结果](test/TEST_REPORT_2026-07-22_SOAK.md)
 - [故障注入结果](test/TEST_REPORT_2026-07-22_LOADFAULT.md)
 - [解析器 Fuzz 结果](test/TEST_REPORT_2026-07-22_FUZZ.md)
-

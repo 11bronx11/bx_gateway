@@ -1,0 +1,223 @@
+server:
+  address:       "127.0.0.1:8090"
+  admin_address: "127.0.0.1:9090"
+  io_workers:    4
+  maintenance:   false
+
+upstreams:
+  - name: httpbin
+    lb: weighted
+    timeout:
+      total_ms:   8000
+      connect_ms: 1000
+      read_ms:    8000
+    limits:
+      max_inflight: 512
+    circuit_breaker:
+      failure_threshold:      5
+      window_ms:              10000
+      buckets:                10
+      min_requests:           5
+      failure_rate:           50
+      slow_ms:                1000
+      slow_rate:              50
+      open_timeout_ms:        5000
+      max_open_timeout_ms:    60000
+      half_open_max_requests: 3
+      half_open_successes:    2
+      failure_statuses: [500, 502, 503, 504]
+    connection_pool:
+      max_idle:        50
+      idle_timeout_ms: 60000
+    health_check:
+      enabled:             true
+      path:                "/status/200"
+      interval_ms:         5000
+      timeout_ms:          2000
+      healthy_threshold:   2
+      unhealthy_threshold: 3
+    endpoints:
+      - { host: "127.0.0.1", port: 8081, weight: 3 }
+      - { host: "127.0.0.1", port: 8082, weight: 1 }
+
+  - name: shop
+    lb: round_robin
+    timeout:
+      total_ms:   8000
+      connect_ms: 1000
+      read_ms:    8000
+    limits:
+      max_inflight: 512
+    circuit_breaker:
+      failure_threshold:      5
+      window_ms:              10000
+      buckets:                10
+      min_requests:           5
+      failure_rate:           50
+      slow_ms:                1000
+      slow_rate:              50
+      open_timeout_ms:        5000
+      max_open_timeout_ms:    60000
+      half_open_max_requests: 3
+      half_open_successes:    2
+      failure_statuses: [500, 502, 503, 504]
+    connection_pool:
+      max_idle:        50
+      idle_timeout_ms: 60000
+    health_check:
+      enabled:             false
+      path:                "/"
+      interval_ms:         5000
+      timeout_ms:          2000
+      healthy_threshold:   2
+      unhealthy_threshold: 3
+    endpoints:
+      - { host: "127.0.0.1", port: 3002, weight: 1 }
+
+  - name: websocket
+    lb: round_robin
+    timeout:
+      total_ms:   8000
+      connect_ms: 1000
+      read_ms:    8000
+    limits:
+      max_inflight: 128
+    circuit_breaker:
+      failure_threshold:      5
+      window_ms:              10000
+      buckets:                10
+      min_requests:           5
+      failure_rate:           50
+      slow_ms:                1000
+      slow_rate:              50
+      open_timeout_ms:        5000
+      max_open_timeout_ms:    60000
+      half_open_max_requests: 3
+      half_open_successes:    2
+      failure_statuses: [500, 502, 503, 504]
+    connection_pool:
+      max_idle:        8
+      idle_timeout_ms: 60000
+    health_check:
+      enabled:             true
+      path:                "/healthz"
+      interval_ms:         5000
+      timeout_ms:          2000
+      healthy_threshold:   1
+      unhealthy_threshold: 2
+    endpoints:
+      - { host: "127.0.0.1", port: 3003, weight: 1 }
+
+rt_cache:
+  cap: 4096
+
+routes:
+  - name: httpbin
+    match_type: prefix
+    path: /api
+    upstream: httpbin
+    priority: 10
+    strip_prefix: true
+    methods: [GET, POST, PUT, PATCH, DELETE]
+    request_headers:
+      set:
+        X-Forwarded-By: bronx-gw
+    auth: none
+    rate_limit:
+      enabled: false
+
+  - name: shop
+    match_type: prefix
+    path: /shop
+    upstream: shop
+    priority: 10
+    strip_prefix: true
+    methods: [GET, POST, PUT, PATCH, DELETE]
+    auth: none
+    rate_limit:
+      enabled: false
+
+  - name: secure
+    match_type: prefix
+    path: /secure
+    upstream: httpbin
+    priority: 20
+    strip_prefix: true
+    methods: [GET, POST]
+    auth: jwt
+    require_scopes: [read]
+    rate_limit:
+      enabled: false
+
+  - name: limited
+    match_type: prefix
+    path: /limited
+    upstream: httpbin
+    priority: 20
+    strip_prefix: true
+    methods: [GET]
+    auth: none
+    rate_limit:
+      enabled: true
+      capacity: 5
+      refill_per_sec: 1
+      key: ip
+
+  - name: websocket
+    match_type: prefix
+    path: /ws
+    upstream: websocket
+    priority: 30
+    strip_prefix: true
+    methods: [GET]
+    auth: none
+    rate_limit:
+      enabled: false
+
+trusted_proxies:
+  - 127.0.0.1/32
+
+cors:
+  enabled:                 true
+  allow_origins:           ["https://gw.local"]
+  allow_methods:           "GET, POST, PUT, PATCH, DELETE, OPTIONS"
+  allow_headers:           "Authorization, Content-Type, X-Api-Key"
+  allow_credentials:       true
+  max_age:                 600
+  short_circuit_preflight: true
+
+auth:
+  jwt:
+    enabled:    true
+    algo:       HS256
+    secret:     "bronx-demo-secret-do-not-use-in-prod"
+    issuer:     "bronx"
+    audience:   ""
+    leeway_sec: 10
+    keys: []
+  api_key:
+    header: "X-Api-Key"
+    keys: []
+  forward:
+    enabled:       true
+    strip_bearer:  true
+    strip_api_key: true
+    prefix:        "X-Auth-"
+
+ip_filter:
+  enabled: true
+  mode:    denylist
+  cidrs:   []
+
+ip_policy:
+  submit_sock:    "/tmp/bronx_demo_ip_submit.sock"
+  subscribe_sock: "/tmp/bronx_demo_ip_subscribe.sock"
+  instance_id:    "gw-demo"
+  waf:
+    enabled: true
+    ban_ms:  600000
+  rate_report:
+    enabled:   true
+    hits:      20
+    window_ms: 60000
+    ban_ms:    300000
