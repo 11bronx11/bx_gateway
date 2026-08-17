@@ -1,0 +1,53 @@
+Linux 6.8.0-137-generic (u-bronx) 	08/17/26 	_aarch64_	(4 CPU)
+
+17:25:36      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:37     1000    156221   15.84   32.67    0.00    0.00   48.51     3  nginx
+17:25:37     1000    156269  123.76   64.36    0.00    0.00  188.12     1  vegeta
+
+17:25:37      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:38     1000    156221   19.00   35.00    0.00    1.00   54.00     3  nginx
+17:25:38     1000    156269  140.00   58.00    0.00    0.00  198.00     1  vegeta
+
+17:25:38      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:39     1000    156221   20.00   34.00    0.00    0.00   54.00     3  nginx
+17:25:39     1000    156269  143.00   56.00    0.00    0.00  199.00     1  vegeta
+
+17:25:39      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:40     1000    156221   19.00   35.00    0.00    1.00   54.00     3  nginx
+17:25:40     1000    156269  142.00   57.00    0.00    0.00  199.00     1  vegeta
+
+17:25:40      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:41     1000    156221   18.00   34.00    0.00    0.00   52.00     3  nginx
+17:25:41     1000    156269  141.00   57.00    0.00    0.00  198.00     1  vegeta
+
+17:25:41      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:42     1000    156221   19.00   35.00    0.00    0.00   54.00     3  nginx
+17:25:42     1000    156269  140.00   58.00    0.00    0.00  198.00     1  vegeta
+
+17:25:42      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:43     1000    156221   18.00   36.00    0.00    1.00   54.00     3  nginx
+17:25:43     1000    156269  138.00   60.00    0.00    0.00  198.00     1  vegeta
+
+17:25:43      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:44     1000    156221   19.00   36.00    0.00    1.00   55.00     3  nginx
+17:25:44     1000    156269  146.00   53.00    0.00    0.00  199.00     1  vegeta
+
+17:25:44      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:45     1000    156221   13.00   32.00    0.00   12.00   45.00     3  nginx
+17:25:45     1000    156269  127.00   51.00    0.00    0.00  178.00     1  vegeta
+
+17:25:45      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:46     1000    156221   17.00   38.00    0.00   16.00   55.00     3  nginx
+17:25:46     1000    156269  134.00   55.00    0.00    0.00  189.00     1  vegeta
+
+17:25:46      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:47     1000    156221   18.00   33.00    0.00   16.00   51.00     3  nginx
+17:25:47     1000    156269  136.00   59.00    0.00    0.00  195.00     1  vegeta
+
+17:25:47      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+17:25:48     1000    156221    9.00   20.00    0.00   32.00   29.00     3  nginx
+17:25:48     1000    156269   83.00   32.00    0.00    0.00  115.00     1  vegeta
+
+Average:      UID       PID    %usr %system  %guest   %wait    %CPU   CPU  Command
+Average:     1000    156221   17.07   33.39    0.00    6.66   50.46     -  nginx
+Average:     1000    156269  132.81   55.04    0.00    0.00  187.84     -  vegeta

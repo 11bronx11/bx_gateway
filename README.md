@@ -2,9 +2,9 @@
 
 Bronx 是一个运行在 Linux 上的 C++20 协程网络框架，底座是有栈协程(ucontext)+ epoll 反应堆 + N:M 调度 + cpu_pool 业务线程池;Bronx_gateway 基于它实现，是一个完整可部署的 HTTP/1.1 L7 反向代理，外加一个本地 IP-ban 控制面。路由、四种负载均衡、熔断三态、连接池、JWT/api_key 鉴权、轻量 WAF、路由级限流、动态 IP 封禁都在网关内，三个原生可执行文件 + YAML 即可跑，运行时零 JS/Python 依赖。
 
-**定位:单机轻量化高性能 L7 网关。** 静态配置驱动，安全策略前置(名单/WAF/鉴权/限流按序短路，拒绝的请求不触达上游)，连接、路由、上游状态、风险规则、观测数据共用同一份运行时事实。"高性能"来自设计而非跑分:I/O 等待让协程让出不占线程、热路径原子快照零锁只读、请求响应体流式转发不整体缓冲、CPU 活 offload 出 reactor;真实吞吐仍需按部署压测，本文只给已跑出的测试数据。
+**定位:单机轻量化高性能 L7 网关。** 静态配置驱动，安全策略前置(名单/WAF/鉴权/限流按序短路，拒绝的请求不触达上游)，连接、路由、上游状态、风险规则、观测数据共用同一份运行时事实。"高性能"来自设计和实测:I/O 等待让协程让出不占线程、请求级 `shared_ptr` 快照隔离在途流量、Guard 原子快照零锁只读、请求响应体流式转发不整体缓冲、CPU 活 offload 出 reactor;吞吐结果和边界见[容量压测报告](benchmark/gateway_vs_nginx/REPORT_2026-08-17.md)。
 
-**边界(对比 nginx/envoy/APISIX 等生产级网关)。** 优势是部署面小、依赖少、行为可追踪可回归、失败状态可见不静默降级;代价是当前只做 HTTP/1.1，不终止 TLS(委托前置层)、无 HTTP/2/3，不做动态服务发现与分布式配置中心，WAF 是固定特征轻量拦截不解析 body，IP-ban 是本机 UDS + SQLite 控制面而非跨机共识系统。它要解决的是"一台或一组 Linux 主机前放一层可控、可观测、可本机恢复的轻量入口"，不是替代大型 API 管理平台。
+**边界(对比 nginx/envoy/APISIX 等生产级网关)。** 优势是部署面小、依赖少、行为可追踪可回归、失败状态可见不静默降级;代价是当前只做 HTTP/1.1，不终止 TLS(委托前置层)、无 HTTP/2/3，不做动态服务发现与分布式配置中心，WAF 是固定特征轻量拦截不解析 body，IP-ban 是本机 UDS + SQLite 控制面而非跨机共识系统。实测中 Nginx 的纯代理 CPU、P99 和单核吞吐均明显更强；Bronx 要解决的是"一台或一组 Linux 主机前放一层可控、可观测、可本机恢复的轻量入口"，不是替代 Nginx 或大型 API 管理平台。
 
 ## 设计实现
 框架层
@@ -22,7 +22,7 @@ Bronx 是一个运行在 Linux 上的 C++20 协程网络框架，底座是有栈
 网关层
 - HTTP 边界:先分帧后业务，`Content-Length`/`chunked` 流式解析，CL 与 TE 冲突、非法分帧一律判歧义拒绝，入口挡请求走私(解析器 fuzz 2000 万+ 输入零 crash)
 - 流式转发:请求/响应体分块边读边转，按上游分帧重编码，全程不整体缓冲，大 body 内存占用平
-- config 快照原子替换:reload 在 CPU pool 建新快照，失败回退旧快照不污染在线流量
+- config 快照整包替换:reload 在 CPU pool 建新快照，成功后在 mutex 短临界区发布，失败保留旧快照
 - 路由:exact 优先 prefix(整段匹配)，host/method/priority 仲裁，generation cache + ARC 路由缓存
 - 负载均衡:RR / 加权 RR / 最少连接 / 加权最少连接
 - 上游治理(endpoint 级):主动健康检查 + 熔断三态 + keep-alive 连接池 + `max_inflight` 并发上限
@@ -52,6 +52,7 @@ Bronx 是一个运行在 Linux 上的 C++20 协程网络框架，底座是有栈
 
 | 已通过的验证 | 实际结果 | 证明的范围 |
 |---|---|---|
+| Bronx vs Nginx 容量阶梯 | 4 vCPU AArch64 loopback；双 worker 同负载 30k QPS 时 Bronx 100% 成功、P99 14.64ms，Nginx P99 9.27ms；40k 目标时 Bronx 实际 36.95k，Nginx 40.00k。单代理核三轮确认稳定点为 Bronx 15k、Nginx 45k。 | 当前 commit、HTTP/1.1 小响应、关闭可选治理策略时的本机容量证据；不是生产容量承诺。 |
 | k6 健康混合运行 | 真实 `gw`、`hub`、双 upstream ；50,468 HTTP 请求、41,912 迭代、88,327 checks 全部通过，`http_req_failed=0`。JWT、三类非法 token、WAF、限流恢复、WebSocket、admin 和 Hub 同步同时验证。 | 健康多 upstream 条件下的持续主链路和安全拒绝能并行工作；不等价于故障注入或跨日稳定性。 |
 | 隔离浸泡与控制面 | 三 upstream、真实 gw/hub/banctl；基线 23,773 请求、p99 46.27ms、传输错误 0；85/85 功能与控制面探针通过。验证了均衡、503/断连/超时后的熔断恢复、Hub 重启、SQLite 恢复、reload、日志轮转和停机。 | 网关、Hub、Guard、Reporter、SQLite 与规则管理的端到端闭环。 |
 | 开环压测和故障注入 | vegeta 200 rps baseline 成功率 100%、p99 约 45ms；延迟、断连、限带宽注入均触发可观测的熔断/超时，解除后 200 rps 成功率恢复 100%、p99 3.3ms。 | 上游侧延迟、断连、低带宽下的熔断与恢复路径。 |
@@ -233,9 +234,9 @@ curl -X POST http://127.0.0.1:9090/reload   # 热重载 gateway.yml
 
 这不是一个提供任意第三方代码插槽的插件平台，换来的是行为可预期、安全模型可测试，以及每种拒绝类型都能在 `/stats` 中单独追踪。
 
-### 4. 配置热更新：原子快照 + 失败回滚，保证在线请求不受影响
+### 4. 配置热更新：完整快照 + 失败回滚，保证在线请求不受影响
 
-**设计问题**：传统服务器热重载（如 nginx `SIGHUP`）通常在信号处理函数里直接重建配置，有几个风险：一是信号处理函数不 async-signal-safe 的操作（malloc、YAML 解析、DNS）会 UB；二是新配置加载失败时旧配置可能已被部分修改；三是框架资源（工作线程数、监听端口）和业务配置（路由/上游）混在一起，一处出错会影响另一处。
+**设计问题**：在线业务配置更新需要同时保证新配置完整可用、失败不污染旧状态、在途请求看到一致版本，并明确区分可热更新的业务对象与需要重启的进程资源。Nginx 的 `SIGHUP` 由 master 主循环处理并采用成熟的 worker 代际切换；Bronx 解决的是自身进程内路由、上游和策略对象的业务级更新，不把两种机制混为一谈。
 
 **设计选择**：Bronx 将配置分为两个平面，用不同信号/接口独立控制：
 
@@ -252,7 +253,7 @@ POST /reload  -> GatewayServer::reload()  (业务平面)
 业务 reload 的完整流程：
 
 1. 在 `BxCpuPool` offload 线程里做所有耗时工作：读取 YAML 文件、解析上游地址、构建路由表和中间件链。
-2. 全部完成后，以 `atomic<shared_ptr<ConfigSnapshot>>` **原子替换**当前快照。
+2. 全部完成后，在 `m_cfgMtx` 保护的短临界区内替换 `shared_ptr<ConfigSnapshot>`；这不是无锁 CAS。
 3. 正在处理中的请求持有旧快照的 `shared_ptr`，不受影响，引用计数归零时自然释放。
 4. 若任意步骤失败（YAML 格式错、上游地址无法解析、中间件构建异常），**不替换**当前快照，admin 返回 `500`，旧快照继续服务流量。
 
@@ -453,7 +454,7 @@ WebSocket 升级不是常规 HTTP 请求——它需要网关代理 Upgrade 握�
 | 有栈协程 + epoll + libc hook | I/O 等待不占线程；超时、取消回到同一调度模型；同步代码形态 | 只面向 Linux/POSIX；性能仍以真实业务压测为准 |
 | 协议歧义零容忍 | 请求走私在网关入口被拒绝，不传染给上游 | 严格解析会拒绝一些畸形但"能用"的客户端 |
 | 固定中间件顺序 | 顺序即安全模型，行为可测试、可推理 | 不是任意加载第三方代码的插件平台 |
-| 原子 business snapshot + 失败回滚 | 热更新失败不污染在线配置 | 监听地址、worker 数、栈资源不是在线伸缩能力 |
+| 完整 business snapshot + 失败回滚 | 热更新失败不污染在线配置 | 监听地址、worker 数、栈资源不是在线伸缩能力 |
 | endpoint 级治理 | 健康、熔断、连接池、限流、指标精确到单台上游 | 不提供服务发现、跨地域调度、全局负载均衡 |
 | XFF 信任链显式配置 | 客户端无法伪造 IP 绕过 IP 策略 | 依赖运维正确配置 `trusted_proxies` |
 | gateway/daemon 分离 + 零锁快照 + epoch 对账 | 风险闭环本机低延迟；两边独立重启；规则可恢复 | 不是跨节点共识/分布式策略系统 |
@@ -468,7 +469,7 @@ WebSocket 升级不是常规 HTTP 请求——它需要网关代理 Upgrade 握�
 - **业务面是 HTTP/1.1**：不做 TLS 终止、HTTP/2、HTTP/3；HTTPS/TLS 应在受信任的前置层（nginx/envoy）终止。
 - **Hub 是本机控制面**：UDS + SQLite，不是跨节点共识、跨机集群或远程策略管理系统；多节点策略统一需要上层负责。
 - **WAF 是轻量特征拦截**：不解析 request body，不能替代专业 WAF、完整漏洞防护或安全审计。
-- **性能需实测**：吞吐上限、跨日稳定性、生产网络延迟、跨机丢包和前置 LB 兼容性需按实际部署单独压测。
+- **性能边界只对本次环境成立**：已有本机 loopback 容量报告；跨日稳定性、生产网络延迟、跨机丢包和前置 LB 兼容性仍需按部署单独压测。
 
 ## 配置参考
 
@@ -799,6 +800,15 @@ API_GW_SOAK_BANCTL_BIN="$PWD/bin/banctl" \
 SOAK_SECONDS=300 bash test/api_gw/run_soak.sh
 ```
 
+容量阶梯会从 Git `HEAD` 导出临时源码、独立构建优化二进制，并隔离 Bronx/Nginx 配置、
+CPU 和结果目录，不修改 checkout 的运行 YAML：
+
+```bash
+./benchmark/gateway_vs_nginx/run.sh
+```
+
+方法、正式结果和证据边界见[容量压测报告](benchmark/gateway_vs_nginx/REPORT_2026-08-17.md)。
+
 故障注入会自行启动隔离网关，需要预先安装 `vegeta` 和 toxiproxy：
 
 ```bash
@@ -834,3 +844,4 @@ K6_EVIDENCE_SOAK_DURATION=15m bash test/k6/run_evidence.sh
 - [隔离浸泡结果](test/TEST_REPORT_2026-07-22_SOAK.md)
 - [故障注入结果](test/TEST_REPORT_2026-07-22_LOADFAULT.md)
 - [解析器 Fuzz 结果](test/TEST_REPORT_2026-07-22_FUZZ.md)
+- [Bronx vs Nginx 容量压测报告](benchmark/gateway_vs_nginx/REPORT_2026-08-17.md)
