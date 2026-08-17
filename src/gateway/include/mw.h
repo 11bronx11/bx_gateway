@@ -61,6 +61,10 @@ public:
     size_t size() const { return m_mws.size(); }
 
 private:
+    // trace 开着时走的插桩版本,每个中间件打进入/离开/短路/自身耗时。
+    // 单独一份是为了让常规 run 保持零额外分支。
+    void run_traced(ReqCtx& ctx) const;
+
     std::vector<Middleware::ptr> m_mws;
 };
 

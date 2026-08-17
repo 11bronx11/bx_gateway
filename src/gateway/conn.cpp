@@ -5,6 +5,8 @@
 #include "log.h"
 #include "io.h"
 #include "endpoint.h"
+#include "trace.h"
+#include "util.h"
 #include <chrono>
 #include <netinet/in.h>
 
@@ -31,7 +33,20 @@ static bool resp_no_body(const GwRequest::ptr& req, int status) {
 GatewayConnection::GatewayConnection(std::shared_ptr<bronx::BxSocket> sock, GatewayServer* server)
     : m_sock(std::move(sock))
     , m_server(server)
-    , m_input(4096) {
+    , m_input(4096) {}
+
+void GatewayConnection::startTrace(const std::string& clientIp) {
+    if(!m_request || !TraceGate::instance().on()) return;
+    if(!m_trace.id) m_trace.id = TraceTag::nextId();
+    m_trace.on = TraceGate::instance().want(clientIp, m_request->getPath());
+    // path 已知后才允许连接级打点，不能把旧 keep-alive 请求的命中状态带到下一条。
+    m_trace.connOn = m_trace.on;
+    GW_TRACE(m_trace, "req  head  "
+        << HttpMethodToString(m_request->getMethod()) << " " << m_request->getPath()
+        << (m_request->getQuery().empty() ? "" : "?") << m_request->getQuery()
+        << " framing=" << framingName(m_reqFraming) << " clen=" << m_req_clen
+        << " hdrs=" << m_request->getHeaders().size()
+        << " ka=" << (m_request->isClose() ? 0 : 1));
 }
 
 // keep-alive 循环驱动
@@ -57,6 +72,7 @@ void GatewayConnection::process() {
         m_lastStatus = 0;
         m_cut = ReqCut::NONE;
         reset_use_round();
+        m_trace.reset(m_req_count + 1);
         auto reqStart = std::chrono::steady_clock::now();
 
         int rt = read_req_head();
@@ -104,6 +120,12 @@ void GatewayConnection::process() {
             : (m_cut != ReqCut::NONE ? ReqResult::REJECT : ReqResult::OK);
         metrics.finishReq(ReqStage::HANDLE, result, m_lastStatus, m_cut, us);
 
+        GW_TRACE(m_trace, "req  done  status=" << m_lastStatus
+                          << " cost=" << (us / 1000.0) << "ms"
+                          << " cut=" << reqCutName(m_cut)
+                          << (m_writeFailed ? " write_fail" : "")
+                          << (stop ? " stop" : ""));
+
         if(stop) {
             break;
         }
@@ -120,6 +142,7 @@ void GatewayConnection::process() {
 
         maybe_trim_buf();
     }
+    GW_TRACE_C(m_trace, "conn close reqs=" << m_req_count);
     metrics.decrConnections();
     m_sock->close();
 }
@@ -131,6 +154,8 @@ int GatewayConnection::fillInput() {
     if(n > 0 && m_input.readable() > m_peak_readable) {
         m_peak_readable = m_input.readable();
     }
+    GW_TRACE2(m_trace, "cli  recv  n=" << n << " buf=" << m_input.readable()
+                       << (n < 0 ? std::string(" errno=") + std::to_string(errno) : std::string()));
     return n;
 }
 
@@ -230,6 +255,7 @@ int GatewayConnection::read_req_head() {
         if(readable > m_peak_readable) {
             m_peak_readable = readable;
         }
+        GW_TRACE2(m_trace, "cli  body recv buf=" << readable);
     });
     m_sock->setRecvTimeout(opts.bodyTimeoutMs);
     return 1;

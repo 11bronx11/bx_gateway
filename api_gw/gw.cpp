@@ -4,6 +4,7 @@
 #include "conf.h"
 #include "admin.h"
 #include "ctx.h"
+#include "mw.h"
 #include "reactor.h"
 #include "endpoint.h"
 #include "log.h"
@@ -110,7 +111,14 @@ private:
             if(!gw) return;
             auto cfg = gw->getConfig();
             ReqCtx ctx(&c);
-            if(cfg && cfg->chain) cfg->chain->run(ctx);
+            if(cfg && cfg->chain) {
+                if(TraceGate::instance().on()) {
+                    loadClientAddr(ctx, cfg->trustedProxies);
+                    c.startTrace(ctx.clientAddr().ok ? ctx.clientAddr().client.toString()
+                                                     : std::string());
+                }
+                cfg->chain->run(ctx);
+            }
         });
 
         if(auto a = bronx::BxAddress::LookupAny(m_biz); !a || !m_gw->bind(a)) {

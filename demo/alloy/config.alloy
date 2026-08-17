@@ -1,0 +1,44 @@
+logging {
+  level = "info"
+}
+
+local.file_match "bronx_demo" {
+  path_targets = [
+    {
+      "__path__" = "/home/bronx/remote/bx_main/demo/run/nginx_access.log",
+      "service"  = "nginx",
+      "log_type" = "access",
+    },
+    {
+      "__path__" = "/home/bronx/remote/bx_main/demo/run/nginx_error.log",
+      "service"  = "nginx",
+      "log_type" = "error",
+    },
+    {
+      "__path__" = "/home/bronx/remote/bx_main/demo/logs/gw_system.log",
+      "service"  = "gateway",
+      "log_type" = "access",
+    },
+    {
+      "__path__" = "/home/bronx/remote/bx_main/demo/logs/gw_trace.log",
+      "service"  = "gateway",
+      "log_type" = "trace",
+    },
+    {
+      "__path__" = "/home/bronx/remote/bx_main/demo/logs/hub_system.log",
+      "service"  = "hub",
+      "log_type" = "system",
+    },
+  ]
+}
+
+loki.source.file "bronx_demo" {
+  targets    = local.file_match.bronx_demo.targets
+  forward_to = [loki.write.local.receiver]
+}
+
+loki.write "local" {
+  endpoint {
+    url = "http://127.0.0.1:3100/loki/api/v1/push"
+  }
+}

@@ -13,6 +13,7 @@
 #include "net_socket.h"
 #include "endpoint.h"
 #include "util.h"
+#include "trace.h"
 #include <strings.h>
 #include <cerrno>
 #include <cctype>
@@ -22,6 +23,22 @@ namespace bronx {
 namespace gateway {
 
 static bronx::BxLogger::ptr g_logger = BRONX_LOG_NAME("system");
+
+// trace 日志用的转发结果短名
+static const char* fwdName(ForwardResult r) {
+    switch(r) {
+        case ForwardResult::OK:                return "OK";
+        case ForwardResult::CONNECT_FAIL:      return "CONNECT_FAIL";
+        case ForwardResult::SEND_FAIL:         return "SEND_FAIL";
+        case ForwardResult::UPSTREAM_TIMEOUT:  return "UPSTREAM_TIMEOUT";
+        case ForwardResult::BAD_RESPONSE:      return "BAD_RESPONSE";
+        case ForwardResult::BAD_REQUEST_BODY:  return "BAD_REQUEST_BODY";
+        case ForwardResult::REQUEST_TOO_LARGE: return "REQUEST_TOO_LARGE";
+        case ForwardResult::EXPECT_FAIL:       return "EXPECT_FAIL";
+        case ForwardResult::UPSTREAM_BUSY:     return "UPSTREAM_BUSY";
+    }
+    return "?";
+}
 
 static bool is_hop_hdr(const std::string& key) {
     static const char* hop[] = {
@@ -285,9 +302,12 @@ ForwardResult Upstream::forward(ReqCtx& ctx,
     AcqConn acquired;
     std::string upHost;
     uint16_t    upPort = 80;
+    auto& tag = ctx.trace();
 
     acquired = group->tryAcquire(connectMs, dueMs);
     if(!acquired.endpoint) {
+        GW_TRACE(tag, "up   acquire FAIL why=" << upWhyName(acqWhy(acquired.why))
+                      << " cost=" << (upMs() - begin) << "ms");
         metrics.incr_acq_fail();
         UpRet ret;
         ret.why = acqWhy(acquired.why);
@@ -321,6 +341,9 @@ ForwardResult Upstream::forward(ReqCtx& ctx,
     }
     upHost = acquired.endpoint->host;
     upPort = acquired.endpoint->port;
+    GW_TRACE(tag, "up   acquire ep=" << upHost << ":" << upPort
+                  << " reused=" << (acquired.reused ? 1 : 0)
+                  << " cost=" << (upMs() - begin) << "ms");
 
     auto& usock = acquired.sock;
     auto arm = [&](uint64_t want) {
@@ -332,6 +355,10 @@ ForwardResult Upstream::forward(ReqCtx& ctx,
     };
     auto end = [&](ForwardResult out, UpRet ret, bool reusable = false) {
         if(ret.costMs == 0) ret.costMs = upMs() - begin;
+        // 所有出口都收敛到这, 一处打点覆盖 20 多个 return
+        GW_TRACE(tag, "up   end     " << fwdName(out) << " mark=" << upMarkName(ret.mark)
+                      << " why=" << upWhyName(ret.why) << " status=" << ret.status
+                      << " cost=" << ret.costMs << "ms reusable=" << (reusable ? 1 : 0));
         group->release(acquired, ret, reusable);
         count(ret);
         return out;
@@ -372,6 +399,15 @@ ForwardResult Upstream::forward(ReqCtx& ctx,
         }
     }
 
+    // head 首行就是上游实际收到的请求行(剥/改前缀后的样子), 直接截出来最省事
+    if(tag.on) {
+        size_t eol = head.find('\r');
+        GW_TRACE(tag, "up   req     " << head.substr(0, eol == std::string::npos ? 0 : eol)
+                      << " head=" << head.size() << "B"
+                      << " cost=" << (upMs() - begin) << "ms"
+                      << (acquired.reused ? "" : " fresh_conn"));
+    }
+
     if(sendContinue) {
         static const char msg[] = "HTTP/1.1 100 Continue\r\n\r\n";
         if(SendAll(conn->socket(), msg, sizeof(msg) - 1) <= 0) {
@@ -388,7 +424,12 @@ ForwardResult Upstream::forward(ReqCtx& ctx,
     if(reqBody) {
         std::string chunk;
         int n;
+        uint64_t bodyBytes = 0;
+        uint32_t bodyBlk = 0;
+        uint64_t bodyBegin = upMs();
         while((n = reqBody->readChunk(chunk)) > 0) {
+            bodyBytes += chunk.size();
+            ++bodyBlk;
             if(!arm(readMs)) {
                 return end(ForwardResult::UPSTREAM_TIMEOUT,
                            UpRet{UpMark::FAIL, UpWhy::TIMEOUT});
@@ -411,6 +452,12 @@ ForwardResult Upstream::forward(ReqCtx& ctx,
             bool timeout = errno == ETIMEDOUT || (dueMs && leftMs(dueMs) == 0);
             return end(timeout ? ForwardResult::UPSTREAM_TIMEOUT : ForwardResult::SEND_FAIL,
                        UpRet{UpMark::FAIL, timeout ? UpWhy::TIMEOUT : UpWhy::SEND});
+        }
+        if(bodyBlk) {
+            GW_TRACE(tag, "up   reqbody " << bodyBytes << "B/" << bodyBlk << "blk"
+                          << " framing=" << framingName(reqFraming)
+                          << "->" << framingName(upstreamReqFraming)
+                          << " cost=" << (upMs() - bodyBegin) << "ms");
         }
     }
 
@@ -508,11 +555,19 @@ ForwardResult Upstream::forward(ReqCtx& ctx,
     bool sse = contentType.size() >= 17
         && strncasecmp(contentType.c_str(), "text/event-stream", 17) == 0;
     bool counted = headRet.mark == UpMark::FAIL || upFraming == BodyFraming::NONE || sse;
+    // headRet.costMs 就是首字节延迟(从 forward 进来到响应头解析完), 反代最该看的数
+    GW_TRACE(tag, "up   rsp     " << rsp->getStatus() << " ttfb=" << headRet.costMs << "ms"
+                  << " framing=" << framingName(upFraming) << " clen=" << upCL
+                  << " sse=" << (sse ? 1 : 0) << " hdrs=" << rsp->getHeaders().size()
+                  << " mark=" << upMarkName(headRet.mark));
     if(counted) {
         group->mark(acquired, headRet);
         count(headRet);
     }
     auto finish = [&](UpRet ret, bool reusable) {
+        GW_TRACE(tag, "up   finish  mark=" << upMarkName(ret.mark)
+                      << " why=" << upWhyName(ret.why) << " status=" << ret.status
+                      << " cost=" << ret.costMs << "ms reusable=" << (reusable ? 1 : 0));
         group->release(acquired, ret, reusable);
         if(!counted) {
             count(ret);
@@ -567,13 +622,19 @@ ForwardResult Upstream::forward(ReqCtx& ctx,
     BodyFraming clientFraming =
         (upFraming == BodyFraming::CHUNKED || upFraming == BodyFraming::UNTIL_CLOSE)
         ? BodyFraming::CHUNKED : BodyFraming::CONTENT_LENGTH;
+    GW_TRACE(tag, "cli  rsp     " << outRsp->getStatus()
+                  << " framing=" << framingName(clientFraming)
+                  << " hdrs=" << outRsp->getHeaders().size());
     BodyReader reader(upFraming, upCL, &ubuf, usock.get());
     std::string chunk;
     int n;
+    uint64_t bodyBegin = upMs();
     if(!resp_no_body(ctx.request()->getMethod(), rsp->getStatus())) {
         while((n = reader.readChunk(chunk)) > 0) {
+            trace_body_blk(tag, chunk.size(), bodyBegin);
             std::string enc = BodyEncoder::encodeChunk(clientFraming, chunk.data(), chunk.size());
             if(conn->sendBodyChunk(enc.data(), enc.size()) <= 0) {
+                trace_body_end(tag, bodyBegin, "client_write_fail");
                 writeFail(ctx);
                 finish(headRet, false);
                 return ForwardResult::OK;
@@ -585,6 +646,8 @@ ForwardResult Upstream::forward(ReqCtx& ctx,
             chunk.clear();
         }
     }
+
+    trace_body_end(tag, bodyBegin, reader.hasError() ? "body_error" : "ok");
 
     UpRet bodyRet = headRet;
     if(reader.hasError()) {

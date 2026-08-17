@@ -1,0 +1,43 @@
+# Framework configuration for the isolated IP-ban hub demo root.
+cpu_pool:
+  threads: 2
+  max_queue: 0
+  name: hub-cpu
+
+fiber:
+  stack_size: 131072
+  stack_pool_size: 8
+  guard_page: 1
+
+tcp:
+  connect:
+    timeout: 5000
+
+tcp_server:
+  recv_timeout: 120000
+
+logs:
+  - name: root
+    level: info
+    appenders:
+      - type: BxStdoutLogAppender
+        async: false
+      - type: BxFileLogAppender
+        file: logs/hub_root.log
+        async: true
+  - name: system
+    level: info
+    appenders:
+      - type: BxStdoutLogAppender
+        async: false
+      - type: BxFileLogAppender
+        file: logs/hub_system.log
+        async: true
+  - name: hub
+    level: info
+    appenders:
+      - type: BxStdoutLogAppender
+        async: false
+      - type: BxFileLogAppender
+        file: logs/hub.log
+        async: true

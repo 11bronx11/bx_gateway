@@ -10,6 +10,7 @@
 #include "router.h"
 #include "ups_group.h"
 #include "mw.h"
+#include "ip.h"
 #include "timer.h"
 #include <functional>
 #include <mutex>
@@ -32,6 +33,7 @@ struct ConfigSnapshot {
     Router::ptr           router;
     UpstreamRegistry::ptr upstreams;
     MwChain::ptr  chain;
+    std::vector<bronx::ipban::Ip> trustedProxies;
     std::vector<bronx::BxTimer::ptr> healthTimers;
 };
 

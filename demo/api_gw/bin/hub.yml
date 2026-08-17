@@ -1,0 +1,7 @@
+server:
+  submit_sock:    "/tmp/bronx_demo_ip_submit.sock"
+  subscribe_sock: "/tmp/bronx_demo_ip_subscribe.sock"
+  admin_sock:     "/tmp/bronx_demo_ip_admin.sock"
+  http_address:   "127.0.0.1:9091"
+  db_path:        "api_gw/bin/db/hub.db"
+  iom_workers:    2

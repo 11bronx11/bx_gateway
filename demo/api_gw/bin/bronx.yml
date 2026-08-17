@@ -1,7 +1,4 @@
-# api_gw/bin/bronx.yml — gw 进程的 bronx 框架配置(hub 用同目录 hub_bronx.yml, 两份独立)
-# 日志平铺在 logs/ 下, 文件名带 gw_ 前缀, 和 hub 的 hub_ 前缀区分, gw+hub 同跑也不撞。
-# logs/ 目录需提前建好, 或把 file 改成绝对路径。
-
+# Framework configuration for the isolated gateway demo root.
 cpu_pool:
   threads: 2
   max_queue: 0
@@ -21,7 +18,7 @@ tcp_server:
 
 logs:
   - name: root
-    level: info          # debug / info / warn / error / fatal
+    level: info
     appenders:
       - type: BxStdoutLogAppender
         async: false
@@ -44,9 +41,6 @@ logs:
       - type: BxFileLogAppender
         file: logs/gw.log
         async: true
-  # 全链路追踪。开关不在这, 在 admin 口: POST /trace/on / POST /trace/off / GET /trace。
-  # level 恒 info(TraceGate 自己控开关), 不挂 stdout —— 一条请求几十行, 刷屏且同步写拖慢
-  # reactor。也别配 sample_rate, 采样限流会静默丢行, trace 丢行就失去意义。
   - name: trace
     level: info
     appenders:

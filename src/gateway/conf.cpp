@@ -417,6 +417,7 @@ ConfigSnapshot::ptr GatewayConfig::BuildSnapshotFromYaml(const YAML::Node& root,
             else BRONX_LOG_WARN(g_logger) << "bad trusted_proxies cidr: " << c.as<std::string>();
         }
     }
+    snap->trustedProxies = trustedProxies;
     CorsOptions cors = parse_cors(root);
 
     auto chain = std::make_shared<MwChain>();

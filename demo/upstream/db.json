@@ -1,0 +1,116 @@
+{
+  "users": [
+    {
+      "id": "u-1001",
+      "name": "Lin Chen",
+      "email": "lin.chen@example.test",
+      "role": "admin"
+    },
+    {
+      "id": "u-1002",
+      "name": "Maya Patel",
+      "email": "maya.patel@example.test",
+      "role": "buyer"
+    },
+    {
+      "id": "u-1003",
+      "name": "Noah Williams",
+      "email": "noah.williams@example.test",
+      "role": "buyer"
+    },
+    {
+      "id": "u-1004",
+      "name": "Sofia Rossi",
+      "email": "sofia.rossi@example.test",
+      "role": "support"
+    },
+    {
+      "id": "u-1005",
+      "name": "Omar Haddad",
+      "email": "omar.haddad@example.test",
+      "role": "buyer"
+    }
+  ],
+  "products": [
+    {
+      "id": "p-2001",
+      "name": "Mechanical Keyboard",
+      "price": 129.9,
+      "stock": 42
+    },
+    {
+      "id": "p-2002",
+      "name": "USB-C Dock",
+      "price": 89.5,
+      "stock": 18
+    },
+    {
+      "id": "p-2003",
+      "name": "4K Monitor",
+      "price": 419.0,
+      "stock": 11
+    },
+    {
+      "id": "p-2004",
+      "name": "Ergonomic Mouse",
+      "price": 64.9,
+      "stock": 73
+    },
+    {
+      "id": "p-2005",
+      "name": "Laptop Stand",
+      "price": 48.0,
+      "stock": 35
+    },
+    {
+      "id": "p-2006",
+      "name": "Noise-Canceling Headset",
+      "price": 179.0,
+      "stock": 24
+    }
+  ],
+  "orders": [
+    {
+      "id": "o-3001",
+      "userId": "u-1002",
+      "productId": "p-2001",
+      "quantity": 1,
+      "status": "shipped"
+    },
+    {
+      "id": "o-3002",
+      "userId": "u-1003",
+      "productId": "p-2003",
+      "quantity": 2,
+      "status": "paid"
+    },
+    {
+      "id": "o-3003",
+      "userId": "u-1005",
+      "productId": "p-2002",
+      "quantity": 1,
+      "status": "processing"
+    },
+    {
+      "id": "o-3004",
+      "userId": "u-1002",
+      "productId": "p-2006",
+      "quantity": 1,
+      "status": "delivered"
+    },
+    {
+      "id": "o-3005",
+      "userId": "u-1003",
+      "productId": "p-2004",
+      "quantity": 3,
+      "status": "cancelled"
+    },
+    {
+      "id": "o-3006",
+      "userId": "u-1005",
+      "productId": "p-2005",
+      "quantity": 2,
+      "status": "shipped"
+    }
+  ]
+}
