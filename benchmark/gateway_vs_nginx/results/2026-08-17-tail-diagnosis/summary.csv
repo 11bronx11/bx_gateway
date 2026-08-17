@@ -1,0 +1,6 @@
+label,path,target_qps,duration_seconds,requests,actual_qps,success,p50_ms,p95_ms,p99_ms,max_ms,proxy_cpu_pct,upstream_cpu_pct,generator_cpu_pct,affinity_note
+bronx-affinity-r2,bronx,8000,20,160000,8000.114544040019,1,0.234192,14.241868,127.346976,328.537202,59.27,13.94,40.58,"iom_0=CPU2;auxiliary=CPU1"
+bronx-affinity-r3,bronx,8000,20,160000,8000.137791573273,1,0.229981,0.927922,40.382753,168.452615,57.72,13.39,38.88,"iom_0=CPU2;auxiliary=CPU1"
+bronx-long-r1,bronx,8000,60,480000,8000.012656020022,1,0.230602,10.704713,79.720004,626.582095,58.05,13.66,39.00,"process allowed on CPU1-2"
+direct-control-r1,direct,8000,60,478944,7971.9909123401585,1,0.172188,2.165429,39.216739,318.313760,11.41,11.41,31.15,"load=CPU0;upstream=CPU3"
+nginx-control-r1,nginx,8000,60,480000,8000.015444696484,1,0.160068,0.294919,8.528049,206.675246,29.05,14.58,36.36,"load=CPU0;proxy=CPU2;upstream=CPU3"

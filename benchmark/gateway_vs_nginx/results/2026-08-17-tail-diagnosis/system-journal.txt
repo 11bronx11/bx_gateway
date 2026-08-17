@@ -1,0 +1,10 @@
+Aug 17 18:18:10 u-bronx systemd[1]: Starting prometheus-node-exporter-apt.service - Collect apt metrics for prometheus-node-exporter...
+Aug 17 18:18:10 u-bronx systemd[1]: Starting prometheus-node-exporter-nvme.service - Collect NVMe metrics for prometheus-node-exporter...
+Aug 17 18:18:10 u-bronx systemd[1]: Starting prometheus-node-exporter-smartmon.service - Collect SMART metrics for prometheus-node-exporter...
+Aug 17 18:18:10 u-bronx systemd[1]: prometheus-node-exporter-smartmon.service: Deactivated successfully.
+Aug 17 18:18:10 u-bronx systemd[1]: Finished prometheus-node-exporter-smartmon.service - Collect SMART metrics for prometheus-node-exporter.
+Aug 17 18:18:10 u-bronx systemd[1]: prometheus-node-exporter-nvme.service: Deactivated successfully.
+Aug 17 18:18:10 u-bronx systemd[1]: Finished prometheus-node-exporter-nvme.service - Collect NVMe metrics for prometheus-node-exporter.
+Aug 17 18:18:11 u-bronx systemd[1]: prometheus-node-exporter-apt.service: Deactivated successfully.
+Aug 17 18:18:11 u-bronx systemd[1]: Finished prometheus-node-exporter-apt.service - Collect apt metrics for prometheus-node-exporter.
+Aug 17 18:18:11 u-bronx systemd[1]: prometheus-node-exporter-apt.service: Consumed 1.279s CPU time.
