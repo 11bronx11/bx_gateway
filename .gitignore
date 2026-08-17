@@ -63,3 +63,4 @@ Makefile
 /demo/upstream/node_modules/
 /demo/out/
 /demo/tools/__pycache__/
+/.playwright-mcp
