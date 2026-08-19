@@ -1,0 +1,17 @@
+{
+  "name": "HEALTHY-CAPACITY-2C2G",
+  "description": "Two-core, 2 GiB adaptive healthy full-chain capacity staircase",
+  "warmup_s": 10,
+  "stage_seconds": 8,
+  "stage_rps": [500, 1000, 2000, 4000, 8000, 16000, 32000],
+  "repeats": 3,
+  "semantic_min": 0.999,
+  "delivery_min": 0.99,
+  "dropped_max_ratio": 0.01,
+  "p99_max_ms": 100,
+  "direct_success_min": 0.995,
+  "direct_delivery_min": 0.99,
+  "direct_calibration_seconds": 3,
+  "rate_limit_per_sec": 1000000,
+  "products": ["bronx", "spring", "kong-dbless", "kong-postgres"]
+}

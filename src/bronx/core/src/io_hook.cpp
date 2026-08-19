@@ -115,7 +115,7 @@ static ssize_t do_io(int fd, OriginFun fun, const char* hook_fun_name,
     }
 
     uint64_t to = ctx->getTimeout(timeout_so);
-    std::shared_ptr<timer_info> tinfo(new timer_info);   // 条件定时器的存活条件
+    std::shared_ptr<timer_info> tinfo;
 
     // 核心循环:遇 EAGAIN 就挂事件 + yield,被唤醒后重试;设了超时还挂个定时器兜底。
     ssize_t n;
@@ -127,7 +127,6 @@ static ssize_t do_io(int fd, OriginFun fun, const char* hook_fun_name,
         if(n == -1 && errno == EAGAIN){
             bronx::BxIoManager* iom = bronx::BxIoManager::Current();
             bronx::BxTimer::ptr timer;
-            std::weak_ptr<timer_info> winfo(tinfo);
 
             // 关键:必须在 armEvent 之前采样取消代次。否则 armEvent 到采样之间若有别的线程
             // cancel 并 bump 代次,本协程采到的就是新值,resume 后比对相等 → 误判 IO 就绪去重试
@@ -137,6 +136,8 @@ static ssize_t do_io(int fd, OriginFun fun, const char* hook_fun_name,
 
             if(to != (uint64_t)-1){
                 // 超时定时器:到点了取消这个事件
+                if(!tinfo) tinfo = std::make_shared<timer_info>();
+                std::weak_ptr<timer_info> winfo(tinfo);
                 timer = iom->addConditionTimer(to, [winfo, fd, iom, event](){
                     auto t = winfo.lock();
                     if(!t || t->cancelled){
@@ -175,7 +176,7 @@ static ssize_t do_io(int fd, OriginFun fun, const char* hook_fun_name,
                 }
 
                 // resume的原因是定时器超时，则返回-1表示操作失败
-                if(tinfo->cancelled == ETIMEDOUT){
+                if(tinfo && tinfo->cancelled == ETIMEDOUT){
                     errno = tinfo->cancelled;
                     return -1;
                 }

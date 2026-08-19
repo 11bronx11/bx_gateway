@@ -34,11 +34,20 @@ class MockState:
         }
         self.pending_errors = 0
         self.requests = 0
+        self.health_requests = 0
+        self.health_failures = 0
         self.drops = 0
+        self.slow_requests = 0
         self.responses = collections.Counter()
         self.recent_requests = collections.deque(maxlen=128)
         self.ws_sessions = 0
         self.ws_frames = 0
+        self.tcp_accepts = 0
+        self.connection_closes = 0
+        self.active_connections = 0
+        self.max_active_connections = 0
+        self.reused_requests = 0
+        self.connection_requests = {}
 
     def configure(self, values):
         probabilities = {
@@ -88,19 +97,53 @@ class MockState:
             if values.get("reset_stats"):
                 self.pending_errors = 0
                 self.requests = 0
+                self.health_requests = 0
+                self.health_failures = 0
                 self.drops = 0
+                self.slow_requests = 0
                 self.responses.clear()
+                self.tcp_accepts = 0
+                self.connection_closes = 0
+                self.max_active_connections = self.active_connections
+                self.reused_requests = 0
+
+    def connection_opened(self, connection_id):
+        with self.lock:
+            self.tcp_accepts += 1
+            self.active_connections += 1
+            self.max_active_connections = max(self.max_active_connections, self.active_connections)
+            self.connection_requests[connection_id] = 0
+
+    def connection_closed(self, connection_id):
+        with self.lock:
+            self.connection_closes += 1
+            self.active_connections = max(0, self.active_connections - 1)
+            self.connection_requests.pop(connection_id, None)
+
+    def record_health_request(self, healthy):
+        with self.lock:
+            self.health_requests += 1
+            if not healthy:
+                self.health_failures += 1
+
+    def record_data_request(self, connection_id):
+        with self.lock:
+            self.requests += 1
+            previous = self.connection_requests.get(connection_id, 0)
+            if previous > 0:
+                self.reused_requests += 1
+            self.connection_requests[connection_id] = previous + 1
 
     def response_plan(self):
         """Reserve a fully deterministic request outcome before any sleep or I/O."""
         with self.lock:
-            self.requests += 1
             config = self.config
             if self.rng.random() < config["drop_probability"]:
                 self.drops += 1
                 return {"drop": True}
             if self.rng.random() < config["slow_probability"]:
                 delay_ms = config["slow_delay_ms"]
+                self.slow_requests += 1
             else:
                 sigma = max(0.0, (config["delay_p99_ms"] - config["delay_p50_ms"]) / 2.326347874)
                 delay_ms = min(
@@ -132,6 +175,7 @@ class MockState:
         interesting = (
             "authorization", "x-api-key", "x-user-id", "x-user-scopes", "x-user-roles",
             "x-forwarded-for", "x-real-ip", "x-soak-probe", "upgrade", "connection",
+            "x-request-id", "x-bench-version", "x-internal-debug",
         )
         with self.lock:
             self.recent_requests.append({
@@ -153,11 +197,20 @@ class MockState:
             return {
                 "name": self.name,
                 "requests": self.requests,
+                "data_requests": self.requests,
+                "health_requests": self.health_requests,
+                "health_failures": self.health_failures,
                 "drops": self.drops,
+                "slow_requests": self.slow_requests,
                 "responses": dict(self.responses),
                 "recent_requests": list(self.recent_requests),
                 "ws_sessions": self.ws_sessions,
                 "ws_frames": self.ws_frames,
+                "tcp_accepts": self.tcp_accepts,
+                "connection_closes": self.connection_closes,
+                "active_connections": self.active_connections,
+                "max_active_connections": self.max_active_connections,
+                "reused_requests": self.reused_requests,
                 "pending_errors": self.pending_errors,
                 "config": dict(self.config),
             }
@@ -176,10 +229,18 @@ class RichHandler(BaseHTTPRequestHandler):
 
     def setup(self):
         super().setup()
+        self._connection_id = id(self.connection)
+        self.state.connection_opened(self._connection_id)
         try:
             self.connection.setsockopt(socket.IPPROTO_TCP, socket.TCP_NODELAY, 1)
         except OSError:
             pass
+
+    def finish(self):
+        try:
+            super().finish()
+        finally:
+            self.state.connection_closed(self._connection_id)
 
     def do_GET(self):
         if self.path == "/_soak/stats":
@@ -187,6 +248,7 @@ class RichHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/_soak/health":
             healthy = self.state.healthy()
+            self.state.record_health_request(healthy)
             self._send_json(200 if healthy else 503, {"name": self.state.name, "healthy": healthy})
             return
         if self.headers.get("Upgrade", "").lower() == "websocket":
@@ -228,6 +290,7 @@ class RichHandler(BaseHTTPRequestHandler):
         return content_length
 
     def _reply(self, request_body_bytes):
+        self.state.record_data_request(self._connection_id)
         self.state.record_request(self.command, self.path, {
             name.lower(): value for name, value in self.headers.items()
         })
@@ -255,6 +318,11 @@ class RichHandler(BaseHTTPRequestHandler):
             "method": self.command,
             "path": self.path,
             "body_bytes": request_body_bytes,
+            "headers": {
+                "x-request-id": self.headers.get("X-Request-ID", ""),
+                "x-bench-version": self.headers.get("X-Bench-Version", ""),
+                "x-internal-debug": self.headers.get("X-Internal-Debug", ""),
+            },
             "pad": "",
         }
         encoded = json.dumps(payload, separators=(",", ":")).encode("utf-8")
@@ -392,6 +460,7 @@ class RichHandler(BaseHTTPRequestHandler):
 class RichThreadingHTTPServer(ThreadingHTTPServer):
     daemon_threads = True
     allow_reuse_address = True
+    request_queue_size = 1024
 
 
 def probability(value):

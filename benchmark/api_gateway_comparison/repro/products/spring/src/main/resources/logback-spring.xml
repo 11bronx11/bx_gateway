@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+  <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+  <springProperty scope="context" name="accessLogFile" source="bench.access-log-file"/>
+
+  <appender name="CONSOLE" class="ch.qos.logback.core.ConsoleAppender">
+    <encoder>
+      <pattern>${CONSOLE_LOG_PATTERN}</pattern>
+    </encoder>
+  </appender>
+
+  <appender name="ACCESS_FILE" class="ch.qos.logback.core.FileAppender">
+    <file>${accessLogFile}</file>
+    <append>true</append>
+    <encoder>
+      <pattern>%d{yyyy-MM-dd'T'HH:mm:ss.SSSXXX} %-5level %logger{36} : %msg%n</pattern>
+    </encoder>
+  </appender>
+
+  <appender name="ACCESS_ASYNC" class="ch.qos.logback.classic.AsyncAppender">
+    <queueSize>32768</queueSize>
+    <discardingThreshold>0</discardingThreshold>
+    <neverBlock>true</neverBlock>
+    <appender-ref ref="ACCESS_FILE"/>
+  </appender>
+
+  <appender name="CONSOLE_ASYNC" class="ch.qos.logback.classic.AsyncAppender">
+    <queueSize>4096</queueSize>
+    <discardingThreshold>0</discardingThreshold>
+    <neverBlock>true</neverBlock>
+    <appender-ref ref="CONSOLE"/>
+  </appender>
+
+  <logger name="bench.access" level="INFO" additivity="false">
+    <appender-ref ref="ACCESS_ASYNC"/>
+  </logger>
+
+  <root level="INFO">
+    <appender-ref ref="CONSOLE_ASYNC"/>
+  </root>
+</configuration>
