@@ -292,6 +292,7 @@ Middleware::ptr MakeAccessLogMiddleware() {
     return std::make_shared<FuncMiddleware>(
         [](ReqCtx& ctx, const NextFn& next) {
             next();   // 先处理
+            if(g_gwlog->getLevel() > BxLogLevel::INFO) return;
             auto req = ctx.request();
             int status = ctx.response() ? ctx.response()->getStatus() : 0;
             std::string auth;
@@ -380,9 +381,17 @@ Middleware::ptr MakeStructuredAccessLogMiddleware(std::vector<bronx::ipban::Ip> 
             uint64_t duration = end >= t0 ? end - t0 : 0;
             uint64_t commit = ctx.commitMs();
             uint64_t latency = commit >= t0 ? commit - t0 : duration;
-            auto req = ctx.request();
             auto rsp = ctx.response();
             const auto& route = ctx.route();
+            int status = ctx.status();
+            if(status == 0 && rsp) status = rsp->getStatus();
+            // 延迟和路由指标
+            auto& metrics = GatewayMetrics::instance();
+            metrics.recordLatency(latency);
+            if(route.matched) metrics.recordRoute(route.routeKey, status);
+            if(g_gwlog->getLevel() > BxLogLevel::INFO) return;
+
+            auto req = ctx.request();
             std::string ip = resolved_client_ip(ctx, trusted);
             std::string reqId;
             ctx.getAttr("request_id", reqId);   // request id 已存好, 直接写日志
@@ -390,12 +399,6 @@ Middleware::ptr MakeStructuredAccessLogMiddleware(std::vector<bronx::ipban::Ip> 
             std::string authResult;
             ctx.getAttr("auth", auth);
             ctx.getAttr("auth_result", authResult);
-            int status = ctx.status();
-            if(status == 0 && rsp) status = rsp->getStatus();
-            // 延迟和路由指标
-            auto& metrics = GatewayMetrics::instance();
-            metrics.recordLatency(latency);
-            if(route.matched) metrics.recordRoute(route.routeKey, status);
             std::ostringstream ss;
             ss << "{\"ts\":"       << t0
                << ",\"request_id\":\"" << json_esc(reqId) << "\""

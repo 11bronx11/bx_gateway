@@ -1,0 +1,17 @@
+{
+  "name": "HARNESS-EARLY-STOP-SMOKE-2C2G",
+  "description": "Forced P99 failure validates early stop and direct calibration; never use as performance evidence",
+  "warmup_s": 1,
+  "stage_seconds": 2,
+  "stage_rps": [10, 20, 40],
+  "repeats": 1,
+  "semantic_min": 0.90,
+  "delivery_min": 0.80,
+  "dropped_max_ratio": 0.20,
+  "p99_max_ms": 0.001,
+  "direct_success_min": 0.80,
+  "direct_delivery_min": 0.80,
+  "direct_calibration_seconds": 1,
+  "rate_limit_per_sec": 1000000,
+  "products": ["bronx"]
+}

@@ -2,6 +2,8 @@
 
 这里保存 Bronx 与 Nginx HTTP/1.1 反向代理的可复现容量测试。正式结论、方法和
 证据边界见 [2026-08-17 压测报告](REPORT_2026-08-17.md)。
+两项热路径改动的前后对比见
+[2026-08-18 优化报告](REPORT_2026-08-18_OPTIMIZATIONS.md)。
 
 ## 测量内容
 
@@ -16,8 +18,9 @@
 ## 复现
 
 依赖 CMake、GCC、Nginx、Vegeta、`jq`、`pidstat`、`taskset`、`curl` 和至少 4 个在线 CPU。
-脚本从 Git `HEAD` 导出临时源码并独立构建，不读取或修改 checkout 中的
-`api_gw/bin/*.yml`。
+脚本默认从 Git `HEAD` 导出临时源码并独立构建，不读取或修改 checkout 中的
+`api_gw/bin/*.yml`。测试未提交改动时显式设置 `SOURCE_MODE=worktree`，脚本会归档
+tracked 工作树差异到结果目录的 `source.patch`。
 
 ```bash
 ./benchmark/gateway_vs_nginx/run.sh
@@ -42,6 +45,7 @@ OUT_DIR=benchmark/gateway_vs_nginx/runs/manual \
 - [单核宽阶梯](results/2026-08-17-one-core/summary.csv)
 - [单核边界复测](results/2026-08-17-one-core-refine/summary.csv)
 - [双核正式对比](results/2026-08-17-two-core/summary.csv)
+- [两项优化前后对比](results/2026-08-18-two-optimizations/README.md)
 
 每个新脚本结果目录都包含 `manifest.sha256`，可在对应目录执行
 `sha256sum -c manifest.sha256` 验证。双核证据是早先同日测试的精简归档，只保留报告

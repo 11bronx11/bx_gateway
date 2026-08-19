@@ -1,0 +1,17 @@
+{
+  "name": "HARNESS-SMOKE-2C2G",
+  "description": "Short adaptive staircase validation only; never use as performance evidence",
+  "warmup_s": 2,
+  "stage_seconds": 2,
+  "stage_rps": [20, 40, 80],
+  "repeats": 1,
+  "semantic_min": 0.95,
+  "delivery_min": 0.90,
+  "dropped_max_ratio": 0.10,
+  "p99_max_ms": 1000,
+  "direct_success_min": 0.90,
+  "direct_delivery_min": 0.90,
+  "direct_calibration_seconds": 1,
+  "rate_limit_per_sec": 1000000,
+  "products": ["bronx", "spring", "kong-dbless", "kong-postgres"]
+}

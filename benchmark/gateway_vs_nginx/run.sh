@@ -18,6 +18,7 @@ load_cpus="${LOAD_CPUS:-0-1}"
 proxy_cpu="${PROXY_CPU:-2}"
 upstream_cpu="${UPSTREAM_CPU:-3}"
 io_workers="${IO_WORKERS:-1}"
+source_mode="${SOURCE_MODE:-head}"
 upstream_port="${UPSTREAM_PORT:-18080}"
 nginx_port="${NGINX_PORT:-18081}"
 bronx_port="${BRONX_PORT:-18082}"
@@ -41,13 +42,14 @@ Usage: benchmark/gateway_vs_nginx/run.sh
 Environment overrides:
   RATES="10000 20000 ..."  ROUNDS=1  PROXIES="bronx nginx"
   BRONX_RATES=<rates>        NGINX_RATES=<rates>  IO_WORKERS=1
+  SOURCE_MODE=head|worktree
   DURATION_SECONDS=12       WARMUP_SECONDS=3
   LOAD_CPUS=0-1             PROXY_CPU=2       UPSTREAM_CPU=3
   DIRECT_RATE=80000         RUN_DIRECT=1
   OUT_DIR=<path>            KEEP_RAW=0         KEEP_WORK=0
 
-The script exports Git HEAD to /tmp, builds RelWithDebInfo there, and never
-reads or edits the checkout's api_gw/bin YAML files.
+The script exports Git HEAD (or the tracked worktree) to /tmp, builds
+RelWithDebInfo there, and never edits the checkout's api_gw/bin YAML files.
 EOF
 }
 
@@ -77,6 +79,10 @@ if [[ ! "$duration" =~ ^[1-9][0-9]*$ || ! "$warmup_duration" =~ ^[1-9][0-9]*$ ]]
 fi
 if [[ ! "$rounds" =~ ^[1-9][0-9]*$ ]]; then
     echo "ROUNDS must be a positive integer" >&2
+    exit 1
+fi
+if [[ "$source_mode" != "head" && "$source_mode" != "worktree" ]]; then
+    echo "SOURCE_MODE must be head or worktree" >&2
     exit 1
 fi
 if [[ -e "$out_dir" && -n "$(find "$out_dir" -mindepth 1 -maxdepth 1 2>/dev/null)" ]]; then
@@ -160,8 +166,16 @@ wait_http() {
 }
 
 mkdir -p "$src_dir"
-log "export git HEAD"
-git -C "$repo_root" archive --format=tar HEAD | tar -xf - -C "$src_dir"
+if [[ "$source_mode" == "head" ]]; then
+    log "export git HEAD"
+    git -C "$repo_root" archive --format=tar HEAD | tar -xf - -C "$src_dir"
+else
+    log "export tracked worktree"
+    git -C "$repo_root" ls-files -z \
+        | tar -C "$repo_root" --null -T - -cf - \
+        | tar -xf - -C "$src_dir"
+    git -C "$repo_root" diff --binary HEAD > "$out_dir/source.patch"
+fi
 
 log "configure RelWithDebInfo build"
 cmake -S "$src_dir" -B "$build_dir" \
@@ -187,6 +201,7 @@ cp "$nginx_prefix/nginx.conf" "$out_dir/configs/nginx-proxy.conf"
     printf 'date_utc=%s\n' "$(date -u +%FT%TZ)"
     printf 'commit=%s\n' "$(git -C "$repo_root" rev-parse HEAD)"
     printf 'branch=%s\n' "$(git -C "$repo_root" branch --show-current)"
+    printf 'source_mode=%s\n' "$source_mode"
     printf 'build_type=RelWithDebInfo\n'
     printf 'cxx_flags=-O2 -g -DNDEBUG -fno-omit-frame-pointer\n'
     printf 'compiler=%s\n' "$(c++ --version | head -1)"
@@ -248,7 +263,7 @@ run_attack() {
         -connections "$connections" -max-connections "$connections" \
         -timeout 2s -max-body 0 -output "$bin" &
     local attack_pid=$!
-    pidstat -u -p "$observed_pid,$upstream_worker_pid,$attack_pid" 1 "$duration" > "$cpu" &
+    LC_ALL=C pidstat -u -p "$observed_pid,$upstream_worker_pid,$attack_pid" 1 "$duration" > "$cpu" &
     local pidstat_pid=$!
     wait "$attack_pid"
     wait "$pidstat_pid" || true

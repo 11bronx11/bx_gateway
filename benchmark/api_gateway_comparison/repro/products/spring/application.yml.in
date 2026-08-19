@@ -1,0 +1,82 @@
+server:
+  port: @GATEWAY_PORT@
+  address: 127.0.0.1
+  netty:
+    access-log-enabled: false
+spring:
+  application:
+    name: spring-gateway-comparison
+  lifecycle:
+    timeout-per-shutdown-phase: 3s
+  cloud:
+    discovery:
+      client:
+        simple:
+          instances:
+            bench-api:
+@UPSTREAM_INSTANCES@
+    loadbalancer:
+      health-check:
+        path:
+          bench-api: /_soak/health
+        interval: 1s
+        initial-delay: 0s
+      retry:
+        enabled: false
+    gateway:
+      server:
+        webflux:
+          metrics:
+            enabled: true
+          httpclient:
+            connect-timeout: 300
+            response-timeout: 1s
+            pool:
+              type: fixed
+              max-connections: 320
+              max-idle-time: 10s
+resilience4j:
+  circuitbreaker:
+    instances:
+      bench-api:
+        sliding-window-type: COUNT_BASED
+        sliding-window-size: 1000
+        minimum-number-of-calls: 200
+        failure-rate-threshold: 90
+        slow-call-duration-threshold: 800ms
+        slow-call-rate-threshold: 90
+        wait-duration-in-open-state: 3s
+        permitted-number-of-calls-in-half-open-state: 2
+  timelimiter:
+    instances:
+      bench-api:
+        timeout-duration: 1s
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus,gateway
+  endpoint:
+    gateway:
+      access: unrestricted
+  prometheus:
+    metrics:
+      export:
+        enabled: true
+logging:
+  file:
+    name: @LOG_FILE@
+  level:
+    root: INFO
+    reactor.netty.http.server.AccessLog: INFO
+bench:
+  upstream-a: 127.0.0.1:@UPSTREAM_A_PORT@
+  upstream-b: 127.0.0.1:@UPSTREAM_B_PORT@
+  upstream-c: 127.0.0.1:@UPSTREAM_C_PORT@
+  upstream-d: 127.0.0.1:@UPSTREAM_D_PORT@
+  upstream-e: 127.0.0.1:@UPSTREAM_E_PORT@
+  jwt-secret: "@JWT_SECRET@"
+  jwt-issuer: "@JWT_ISSUER@"
+  banned-ip: "@BANNED_IP@"
+  rate-capacity: @RATE_CAPACITY@
+  rate-refill: @RATE_REFILL@

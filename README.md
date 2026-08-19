@@ -53,6 +53,7 @@ Bronx 是一个运行在 Linux 上的 C++20 协程网络框架，底座是有栈
 | 已通过的验证 | 实际结果 | 证明的范围 |
 |---|---|---|
 | Bronx vs Nginx 容量阶梯 | 4 vCPU AArch64 loopback；双 worker 同负载 30k QPS 时 Bronx 100% 成功、P99 14.64ms，Nginx P99 9.27ms；40k 目标时 Bronx 实际 36.95k，Nginx 40.00k。单代理核三轮确认稳定点为 Bronx 15k、Nginx 45k。 | 当前 commit、HTTP/1.1 小响应、关闭可选治理策略时的本机容量证据；不是生产容量承诺。 |
+| 两项热路径优化复测 | 单 worker、30k 目标饱和负载下，实际 QPS 三轮中位数从 17.18k 提升到 17.51k（+1.95%），P50 下降 3.16%，P99 基本持平。 | 日志关闭短路和 I/O 超时状态懒创建的合并效果；未做单项消融。 |
 | k6 健康混合运行 | 真实 `gw`、`hub`、双 upstream ；50,468 HTTP 请求、41,912 迭代、88,327 checks 全部通过，`http_req_failed=0`。JWT、三类非法 token、WAF、限流恢复、WebSocket、admin 和 Hub 同步同时验证。 | 健康多 upstream 条件下的持续主链路和安全拒绝能并行工作；不等价于故障注入或跨日稳定性。 |
 | 隔离浸泡与控制面 | 三 upstream、真实 gw/hub/banctl；基线 23,773 请求、p99 46.27ms、传输错误 0；85/85 功能与控制面探针通过。验证了均衡、503/断连/超时后的熔断恢复、Hub 重启、SQLite 恢复、reload、日志轮转和停机。 | 网关、Hub、Guard、Reporter、SQLite 与规则管理的端到端闭环。 |
 | 开环压测和故障注入 | vegeta 200 rps baseline 成功率 100%、p99 约 45ms；延迟、断连、限带宽注入均触发可观测的熔断/超时，解除后 200 rps 成功率恢复 100%、p99 3.3ms。 | 上游侧延迟、断连、低带宽下的熔断与恢复路径。 |
@@ -800,14 +801,16 @@ API_GW_SOAK_BANCTL_BIN="$PWD/bin/banctl" \
 SOAK_SECONDS=300 bash test/api_gw/run_soak.sh
 ```
 
-容量阶梯会从 Git `HEAD` 导出临时源码、独立构建优化二进制，并隔离 Bronx/Nginx 配置、
-CPU 和结果目录，不修改 checkout 的运行 YAML：
+容量阶梯默认从 Git `HEAD` 导出临时源码、独立构建优化二进制，并隔离 Bronx/Nginx
+配置、CPU 和结果目录，不修改 checkout 的运行 YAML。复测未提交改动时可显式设置
+`SOURCE_MODE=worktree`：
 
 ```bash
 ./benchmark/gateway_vs_nginx/run.sh
 ```
 
-方法、正式结果和证据边界见[容量压测报告](benchmark/gateway_vs_nginx/REPORT_2026-08-17.md)。
+方法、正式结果和证据边界见[容量压测报告](benchmark/gateway_vs_nginx/REPORT_2026-08-17.md)
+及[两项优化报告](benchmark/gateway_vs_nginx/REPORT_2026-08-18_OPTIMIZATIONS.md)。
 
 故障注入会自行启动隔离网关，需要预先安装 `vegeta` 和 toxiproxy：
 
@@ -845,3 +848,4 @@ K6_EVIDENCE_SOAK_DURATION=15m bash test/k6/run_evidence.sh
 - [故障注入结果](test/TEST_REPORT_2026-07-22_LOADFAULT.md)
 - [解析器 Fuzz 结果](test/TEST_REPORT_2026-07-22_FUZZ.md)
 - [Bronx vs Nginx 容量压测报告](benchmark/gateway_vs_nginx/REPORT_2026-08-17.md)
+- [两项热路径优化压测报告](benchmark/gateway_vs_nginx/REPORT_2026-08-18_OPTIMIZATIONS.md)
