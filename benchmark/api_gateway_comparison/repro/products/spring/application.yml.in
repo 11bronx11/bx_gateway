@@ -16,11 +16,17 @@ spring:
             bench-api:
 @UPSTREAM_INSTANCES@
     loadbalancer:
+      configurations: health-check
       health-check:
         path:
           bench-api: /_soak/health
+        # One complete sweep per second: about 300 probes per node in a 300s run.
+        # Discovery is cached below the health-check layer, so requests do not
+        # create additional probes.
         interval: 1s
-        initial-delay: 0s
+        initial-delay: 1s
+        # Publish one complete health result per sweep, not one partial list per instance.
+        update-results-list: false
       retry:
         enabled: false
     gateway:
@@ -64,12 +70,12 @@ management:
       export:
         enabled: true
 logging:
-  file:
-    name: @LOG_FILE@
+  config: classpath:logback-spring.xml
   level:
     root: INFO
-    reactor.netty.http.server.AccessLog: INFO
+    bench.access: INFO
 bench:
+  access-log-file: "@LOG_FILE@"
   upstream-a: 127.0.0.1:@UPSTREAM_A_PORT@
   upstream-b: 127.0.0.1:@UPSTREAM_B_PORT@
   upstream-c: 127.0.0.1:@UPSTREAM_C_PORT@

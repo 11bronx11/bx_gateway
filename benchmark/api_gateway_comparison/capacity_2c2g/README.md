@@ -45,14 +45,62 @@ CPU 3。目标机器 CPU 编号不同时，使用 `--load-cpu`、`--target-cpus`
 请求实际经过路由匹配、可信客户端 IP、IP 策略、WAF 扫描、JWT 签名/过期/issuer/scope、限流、
 请求头改写、负载均衡、健康上游选择、连接池和转发。访问日志与指标开启，高精度 trace 关闭。
 
+## 测试场景设计
+
+### 请求链路
+
+每个请求从 k6 发出，经过被测网关的完整中间件链，最终到达上游并返回：
+
+```
+k6 (CPU 0)
+  → 网关 (CPU 1-2): ClientAddr 解析 → 结构化日志 → 安全头 → IP 策略 (通过) 
+                    → WAF 扫描 (通过) → 路由匹配 (/api/items)
+                    → JWT 认证 (HS256, iss/scope 验证) → 限流 (1M/s, 通过)
+                    → 请求头改写 (删除内部头, 添加 X-Forwarded-*)
+  → 负载均衡 (加权最少连接 / least-connections)
+  → 连接池 (复用 HTTP/1.1 keep-alive)
+  → 上游 A/B (CPU 3): 基线延迟 1-2ms, 256B JSON 响应
+  ← 网关: 响应日志 + 指标更新
+  ← k6: 验证 200 + 上游名 + 路径改写 + request-id 一致性
+```
+
+**设计目标**：在不触发拒绝逻辑（IP 封禁、WAF 拦截、限流、JWT 失败）的前提下，让请求经过网关所有治理中间件，测量网关在"正常通过"路径上的最大吞吐和延迟表现。
+
+### 测试上游
+
+使用与综合测试相同的 `test/api_gw/mock_rich.py`，但配置为**健康基线模式**：
+
+**上游 A 配置**：
+```bash
+python3 mock_rich.py --port 9001 --name bench-a --seed 100 \
+  --delay-p50-ms 1.0 --delay-p99-ms 3.0 --max-normal-delay-ms 10 \
+  --body-sizes 256 --healthy
+```
+
+**上游 B 配置**：
+```bash
+python3 mock_rich.py --port 9002 --name bench-b --seed 101 \
+  --delay-p50-ms 2.0 --delay-p99-ms 4.0 --max-normal-delay-ms 10 \
+  --body-sizes 256 --healthy
+```
+
+**关键特性**：
+- **故障概率全关闭**：`error_probability=0`、`drop_probability=0`、`slow_probability=0`
+- **固定响应体**：256 字节 JSON，包含上游名、请求方法、路径、透传头（X-Request-ID/X-Bench-Version），减少序列化开销和带宽干扰
+- **HTTP/1.1 keep-alive**：持续开启，验证连接池复用能力（统计端点 `reused_requests` 计数必须 >0）
+- **健康检查端点**：`/_soak/health` 始终返回 200，网关主动健康检查每 2-5 秒探测一次
+- **统计端点**：`/_soak/stats` 提供数据请求计数、健康检查计数、连接复用统计、响应码分布，用于验证负载均衡是否均匀和连接池是否生效
+
+**上游容量验证**：每轮首个不稳定档位后，runner 自动对 A/B 两台上游并发直连校准（绕过网关，k6 直接连上游，相同 RPS）。若直连也失败，标记 `load_generator_or_upstream`，说明瓶颈在上游或 k6；若直连通过，标记 `gateway_path_or_k6`，排除上游容量不足。
+
 ## 2 核配置
 
 | 产品 | 数据面并行度 | CPU/内存总限制 | 上游与连接配置 |
 |---|---:|---:|---|
 | Bronx | 2 IO worker、2 CPU worker；Hub 1 worker | `gw + hub` 共 2 CPU/2 GiB | A/B 等权 weighted least-conn，连接池和主动健康检查开启 |
 | Spring | Reactor Netty 2 worker | 2 CPU/2 GiB，Xmx 1280 MiB，direct 384 MiB | A/B 等权官方 LoadBalancer，fixed pool 320，健康检查、Bucket4j 限流和 Resilience4j route circuit breaker 开启 |
-| Kong DB-less | 2 Nginx worker | 2 CPU/2 GiB | A/B 等权 least-connections，Kong/Nginx 连接复用和主动/被动健康检查开启 |
-| Kong + PostgreSQL | 2 Nginx worker | Kong 1.75 CPU/1.75 GiB + PG 0.25 CPU/0.25 GiB | 与 DB-less 相同数据面治理；数据库资源计入总量 |
+| Kong DB-less | 2 worker | 2 CPU/2 GiB | A/B 等权 least-connections，连接复用和主动/被动健康检查开启 |
+| Kong + PostgreSQL | 2 worker | Kong 1.75 CPU/1.75 GiB + PG 0.25 CPU/0.25 GiB | 与 DB-less 相同数据面治理；数据库资源计入总量 |
 
 这些是该资源档位的预先冻结配置，不允许在看到结果后只为某个产品追加 CPU、关闭日志/插件或
 修改请求语义。Spring/Kong/PG 使用各发行版当前默认值的字段保持默认，只有表内与公共协议所需

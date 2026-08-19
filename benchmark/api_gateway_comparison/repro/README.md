@@ -4,9 +4,6 @@
 Spring Cloud Gateway、Kong DB-less 和 Kong + PostgreSQL 的完整 API 请求链测试。测试对象
 不会并发运行，每次命令都会创建新的结果目录，成功与失败证据都不会覆盖。
 
-Nginx 不在比较对象中。本套件比较的是包含 JWT、WAF、IP 封禁、限流、路由、指标、日志、
-WebSocket、在线变更和转发的 API 网关链，而不是裸反向代理。
-
 ## 一键命令
 
 在本目录执行：
@@ -114,7 +111,76 @@ PSS 显示为 `null`；容器实际 cgroup `memory.current`/峰值仍被采样�
 恢复期可用率分别设硬门禁，不能被总体语义成功率平均掉。
 
 `smoke-20s` 只证明脚本、事件、清理和证据链可运行。发布性能结论必须使用 `full-5m`，并遵守
-上级 [测试设计书](../TEST_DESIGN.md) 的复测、能力等价和结论边界。
+[COMPARISON_2C2G.md](COMPARISON_2C2G.md) 的复测、能力等价和结论边界。
+
+## 测试用例设计
+
+### 综合测试案例（full-5m）
+
+固定 1000 RPS 运行 5 分钟，同时覆盖网关基础能力和可靠性：
+
+**流量类型权重**（`traffic_weights`）：
+- **normal (70%)**：正常请求，经路由后转发到健康上游
+- **auth (10%)**：JWT 认证请求，验证 HS256/RS256/ES256 签名和多 kid 轮转
+- **waf (5%)**：携带 SQL 注入/XSS/路径穿越/扫描器指纹模式，期望被 WAF 拦截
+- **banned (5%)**：来自已封禁 IP 的请求，期望被动态名单拦截
+- **rate (5%)**：超过限流配额的请求，期望被限流中间件拦截
+- **routing (5%)**：测试前缀剥离、方法过滤、请求头改写等路由能力
+
+**WebSocket 并发连接**：100 个长连接，验证协议升级和双向帧转发。
+
+**故障注入事件**（`events` 数组）：
+- **60s**：热重载有效配置（`reload-valid`）
+- **75s**：热重载无效配置（`reload-invalid`），期望网关拒绝并保持旧配置运行
+- **90s-108s**：上游 C 返回 503 错误，验证熔断器开启和故障期可用率（≥95%）
+- **112s-130s**：上游 D 延迟 2 秒，验证慢调用检测和熔断
+- **134s-152s**：上游 E 离线（健康检查失败 + 丢弃所有连接），验证健康检查和实例摘除
+- **150s**：重启控制面（Bronx hub / Kong Admin API / Spring Actuator），验证控制面与数据面解耦
+- **195s-225s**：开启高精度 trace，验证可观测性和链路追踪能力
+- **240s**：日志轮转（`log-rotate`），验证日志系统无丢失
+
+每个故障注入点都有前后快照采样（`snapshot-fault-*` / `snapshot-recovery-*`），用于验证故障检测速度和恢复时长。
+
+**在线断言**：
+- 语义成功率 ≥99.9%（`semantic_min: 0.999`）
+- 故障期可用率 ≥95%（`fault_available_min: 0.95`）
+- 恢复期可用率 ≥95%（`recovery_available_min: 0.95`）
+- 正常、路由、解封后 ban、限流放行请求不仅检查 200 状态码，还检查：上游实例名、方法、改写后路径、配置版本头（X-Bench-Version）、内部调试头删除（X-Internal-Debug 不得泄露）、request-id 端到端一致性
+
+### 测试上游
+
+五个独立的 mock 上游（A/B/C/D/E），基于 `test/api_gw/mock_rich.py` 实现，具备以下特性：
+
+**基线延迟分布**（默认配置）：
+- 上游 A：p50=1ms, p99=3ms（模拟快速缓存服务）
+- 上游 B：p50=2ms, p99=4ms
+- 上游 C：p50=3ms, p99=5ms（故障注入目标：503 错误）
+- 上游 D：p50=4ms, p99=6ms（故障注入目标：慢调用 2s）
+- 上游 E：p50=5ms, p99=7ms（故障注入目标：离线）
+- `--max-normal-delay-ms 10`：正常延迟上限 10ms，超过即判定为尾延迟
+
+**可注入故障类型**（通过 `POST /_soak/control` 运行时控制）：
+- `error_probability`：返回 503 错误的概率（0.0-1.0）
+- `error_burst`：错误突发计数（一次触发连续返回 N 个错误）
+- `drop_probability`：丢弃 TCP 连接的概率（模拟网络分区）
+- `slow_probability`：慢请求概率，延迟由 `slow_delay_ms` 控制（默认 2000ms）
+- `chunked_probability`：分块传输概率（默认 10%，验证 chunked 解析）
+- `healthy`：健康检查开关（false 时 `/_soak/health` 返回 503）
+
+**响应特征**：
+- **HTTP/1.1 keep-alive**：验证连接池复用能力
+- **响应体**：JSON 格式，包含上游名称、请求方法、路径、body 字节数、透传的请求头（X-Request-ID/X-Bench-Version/X-Internal-Debug），用 pad 字段填充至目标大小
+- **body_sizes**：默认 256 字节（减少带宽干扰，聚焦网关处理能力）
+- **WebSocket 支持**：正确处理 Sec-WebSocket-Key 握手，升级后按 RFC 6455 接收和回显帧
+
+**统计端点**（`GET /_soak/stats`）：
+- 数据请求计数、健康检查计数和失败数、连接复用统计（`reused_requests`）
+- 响应码分布（`responses`）、慢请求计数（`slow_requests`）、丢弃连接数（`drops`）
+- TCP 连接数（`tcp_accepts` / `active_connections` / `max_active_connections`）
+- WebSocket 会话数和帧计数
+- 最近 128 个请求的方法、路径和关键请求头（用于故障诊断）
+
+所有 mock 上游都由 `run.sh` 在测试开始前启动，通过环境变量 `BENCH_UPSTREAM_{A..E}_PORT` 指定端口，故障注入通过事件时间轴精确控制，每个故障前后都有快照记录，形成完整的上游行为证据链。
 
 ## 清理边界
 

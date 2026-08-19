@@ -4,11 +4,13 @@ import com.github.benmanes.caffeine.cache.Caffeine;
 import io.github.bucket4j.caffeine.CaffeineProxyManager;
 import io.github.bucket4j.distributed.proxy.AsyncProxyManager;
 import io.github.bucket4j.distributed.remote.RemoteBucketState;
+import io.github.resilience4j.circuitbreaker.CircuitBreakerRegistry;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicLong;
 import javax.crypto.SecretKey;
 import javax.crypto.spec.SecretKeySpec;
 import org.slf4j.Logger;
@@ -26,10 +28,7 @@ import org.springframework.cloud.gateway.route.builder.GatewayFilterSpec;
 import org.springframework.cloud.gateway.route.builder.RouteLocatorBuilder;
 import org.springframework.cloud.gateway.support.ipresolver.XForwardedRemoteAddressResolver;
 import org.springframework.cloud.loadbalancer.annotation.LoadBalancerClient;
-import org.springframework.cloud.loadbalancer.core.ServiceInstanceListSupplier;
-import org.springframework.context.ConfigurableApplicationContext;
 import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
 import org.springframework.core.Ordered;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.config.Customizer;
@@ -49,9 +48,12 @@ import org.springframework.web.reactive.function.server.ServerResponse;
 import reactor.core.publisher.Mono;
 
 @SpringBootApplication
-@LoadBalancerClient(name = "bench-api", configuration = GatewayApplication.BenchLoadBalancerConfiguration.class)
+@LoadBalancerClient(name = "bench-api", configuration = BenchLoadBalancerConfiguration.class)
 public class GatewayApplication {
   private static final List<String> RATE_LIMITED_ROUTE_IDS = rateLimitedRouteIds();
+  private static final AtomicLong FALLBACK_COUNT = new AtomicLong();
+  private static final AtomicLong CALL_NOT_PERMITTED_COUNT = new AtomicLong();
+  static final Logger LOG = LoggerFactory.getLogger(GatewayApplication.class);
 
   public static void main(String[] args) {
     SpringApplication.run(GatewayApplication.class, args);
@@ -166,7 +168,44 @@ public class GatewayApplication {
   RouterFunction<ServerResponse> circuitBreakerFallback() {
     return RouterFunctions.route()
         .GET("/__bench/fallback", request ->
-            ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE).build())
+            fallbackResponse())
+        .build();
+  }
+
+  private static Mono<ServerResponse> fallbackResponse() {
+    long count = FALLBACK_COUNT.incrementAndGet();
+    if (count == 1 || count % 100 == 0) {
+      LOG.warn("spring.gateway.fallback status=503 count={}", count);
+    }
+    return ServerResponse.status(HttpStatus.SERVICE_UNAVAILABLE).build();
+  }
+
+  @Bean
+  ApplicationRunner observeCircuitBreaker(CircuitBreakerRegistry registry) {
+    return ignored -> {
+      var circuitBreaker = registry.circuitBreaker("bench-api");
+      circuitBreaker.getEventPublisher().onStateTransition(event ->
+          LOG.warn("spring.circuit_breaker name={} transition={} at={}",
+              event.getCircuitBreakerName(), event.getStateTransition(), event.getCreationTime()));
+      circuitBreaker.getEventPublisher().onCallNotPermitted(event -> {
+        long count = CALL_NOT_PERMITTED_COUNT.incrementAndGet();
+        if (count == 1 || count % 100 == 0) {
+          LOG.warn("spring.circuit_breaker name={} call_not_permitted_count={}",
+              event.getCircuitBreakerName(), count);
+        }
+      });
+      LOG.info("spring.circuit_breaker name={} initial_state={}",
+          circuitBreaker.getName(), circuitBreaker.getState());
+    };
+  }
+
+  @Bean
+  RouterFunction<ServerResponse> benchmarkControl(CircuitBreakerRegistry circuitBreakers) {
+    return RouterFunctions.route()
+        .POST("/__bench/control/reset-circuits", request -> {
+      circuitBreakers.getAllCircuitBreakers().forEach(circuitBreaker -> circuitBreaker.reset());
+          return ServerResponse.noContent().build();
+        })
         .build();
   }
 
@@ -216,17 +255,6 @@ public class GatewayApplication {
     return List.copyOf(ids);
   }
 
-  @Configuration(proxyBeanMethods = false)
-  static class BenchLoadBalancerConfiguration {
-    @Bean
-    ServiceInstanceListSupplier serviceInstanceListSupplier(ConfigurableApplicationContext context) {
-      return ServiceInstanceListSupplier.builder()
-          .withDiscoveryClient()
-          .withHealthChecks()
-          .withWeighted()
-          .build(context);
-    }
-  }
 }
 
 @Component
@@ -253,9 +281,15 @@ final class AccessObservationFilter implements GlobalFilter, Ordered {
     return chain.filter(exchange.mutate().request(request).build()).doFinally(signal -> {
       int status = exchange.getResponse().getStatusCode() == null
           ? 0 : exchange.getResponse().getStatusCode().value();
-      LOG.info("access request_id={} method={} path={} status={} latency_us={}", requestId,
-          exchange.getRequest().getMethod(), exchange.getRequest().getURI().getRawPath(), status,
-          (System.nanoTime() - started) / 1000);
+      if (status >= 400 || "bench-observe-fixed".equals(requestId)) {
+        LOG.info("access request_id={} method={} path={} status={} latency_us={}", requestId,
+            exchange.getRequest().getMethod(), exchange.getRequest().getURI().getRawPath(), status,
+            (System.nanoTime() - started) / 1000);
+      } else if (LOG.isDebugEnabled()) {
+        LOG.debug("access request_id={} method={} path={} status={} latency_us={}", requestId,
+            exchange.getRequest().getMethod(), exchange.getRequest().getURI().getRawPath(), status,
+            (System.nanoTime() - started) / 1000);
+      }
     });
   }
 }

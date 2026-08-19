@@ -199,6 +199,11 @@ EOF
     wait_admin
     wait_postgres
     ;;
+  reset-after-warmup)
+    load_state
+    printf '{"supported":false,"status":"NOOP","reason":"Kong PostgreSQL has no circuit registry to reset"}\n' \
+      >"$BENCH_PRODUCT_DIR/snapshots/reset-after-warmup.json"
+    ;;
   pids)
     load_state
     container_pids "$kong_container"

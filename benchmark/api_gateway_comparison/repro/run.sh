@@ -503,6 +503,7 @@ PY
   "$current_adapter" security-seed >"$current_product_dir/logs/security-seed.log" 2>&1 || product_failed=1
   export BENCH_START_EPOCH_MS=0
   BENCH_WS_CLIENTS=0 run_k6 warmup "$warmup_s" warmup || product_failed=1
+  "$current_adapter" reset-after-warmup >"$current_product_dir/logs/reset-after-warmup.log" 2>&1 || product_failed=1
   for upstream in A B C D E; do
     mock_control "$upstream" '{"error_probability":0,"drop_probability":0,"slow_probability":0,"healthy":true,"clear_pending_errors":true,"reset_stats":true}' || product_failed=1
   done

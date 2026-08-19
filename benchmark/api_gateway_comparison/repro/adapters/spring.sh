@@ -225,6 +225,13 @@ EOF
     load_state
     wait_http "http://127.0.0.1:$BENCH_GATEWAY_PORT/actuator/health"
     ;;
+  reset-after-warmup)
+    load_state
+    code="$(curl -sS --max-time 5 -o "$BENCH_PRODUCT_DIR/snapshots/reset-circuits.txt" -w '%{http_code}' \
+      -X POST -H "Authorization: Bearer $BENCH_VALID_TOKEN" \
+      "http://127.0.0.1:$BENCH_GATEWAY_PORT/__bench/control/reset-circuits" || true)"
+    [[ "$code" == 204 ]] || die "circuit reset returned HTTP $code"
+    ;;
   pids)
     load_state
     unit_pid "$unit"

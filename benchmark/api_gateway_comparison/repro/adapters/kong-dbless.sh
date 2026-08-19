@@ -182,6 +182,11 @@ EOF
     load_state
     wait_admin
     ;;
+  reset-after-warmup)
+    load_state
+    printf '{"supported":false,"status":"NOOP","reason":"Kong DB-less has no circuit registry to reset"}\n' \
+      >"$BENCH_PRODUCT_DIR/snapshots/reset-after-warmup.json"
+    ;;
   pids)
     load_state
     container_pids "$container"

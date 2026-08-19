@@ -356,6 +356,11 @@ EOF
     wait_http "http://127.0.0.1:$BENCH_ADMIN_PORT/healthz" 30
     wait_http "http://127.0.0.1:$BENCH_HUB_PORT/healthz" 30
     ;;
+  reset-after-warmup)
+    load_state
+    printf '{"supported":false,"status":"NOOP","reason":"warmup has no injected faults; Bronx breaker starts closed"}\n' \
+      >"$BENCH_PRODUCT_DIR/snapshots/reset-after-warmup.json"
+    ;;
   pids)
     load_state
     unit_pid "$gw_unit"
